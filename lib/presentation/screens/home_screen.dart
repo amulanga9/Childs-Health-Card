@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
 import '../providers/home_provider.dart';
+import '../providers/sync_provider.dart';
 import '../widgets/child_profile_header.dart';
 import '../widgets/episodes_carousel.dart';
 import '../widgets/health_calendar.dart';
@@ -83,10 +84,46 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       child: CustomScrollView(
         physics: const BouncingScrollPhysics(),
         slivers: [
+          // App Bar с кнопкой синхронизации
+          SliverAppBar(
+            floating: true,
+            snap: true,
+            backgroundColor: theme.colorScheme.surface,
+            elevation: 0,
+            title: Text(
+              'Карта здоровья',
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            actions: [
+              Consumer<SyncProvider>(
+                builder: (context, syncProvider, _) {
+                  return IconButton(
+                    onPressed: syncProvider.state == SyncState.syncing
+                        ? null
+                        : () => _syncWithBackend(context),
+                    icon: syncProvider.state == SyncState.syncing
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.cloud_sync),
+                    tooltip: syncProvider.lastSyncTime != null
+                        ? 'Последняя синхронизация: ${_formatSyncTime(syncProvider.lastSyncTime!)}'
+                        : 'Синхронизировать с сервером',
+                  );
+                },
+              ),
+              const SizedBox(width: 8),
+            ],
+          ),
           // Верхняя панель профиля
           SliverToBoxAdapter(
             child: SafeArea(
               bottom: false,
+              top: false,
               child: ChildProfileHeader(
                 child: homeProvider.selectedChild!,
                 onTap: () => context.push('/child-profile/${homeProvider.selectedChild!.id}'),
@@ -231,7 +268,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 icon: Icons.qr_code,
                 label: 'QR для врача',
                 isSelected: false,
-                onTap: () => _showQRDialog(context),
+                onTap: () => context.push('/qr-generator'),
               ),
               _buildNavButton(
                 theme,
@@ -370,27 +407,45 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
-  /// Диалог QR кода
-  void _showQRDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('QR для врача'),
-        content: const Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.qr_code, size: 120),
-            SizedBox(height: 16),
-            Text('Эта функция в разработке'),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Закрыть'),
+  /// Синхронизация с backend
+  Future<void> _syncWithBackend(BuildContext context) async {
+    final syncProvider = context.read<SyncProvider>();
+
+    final success = await syncProvider.syncAll();
+
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            success
+                ? 'Данные успешно синхронизированы'
+                : 'Ошибка синхронизации: ${syncProvider.errorMessage}',
           ),
-        ],
-      ),
-    );
+          backgroundColor: success ? Colors.green : Colors.red,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+
+      // Обновляем локальные данные после синхронизации
+      if (success) {
+        context.read<HomeProvider>().refresh();
+      }
+    }
+  }
+
+  /// Форматирование времени последней синхронизации
+  String _formatSyncTime(DateTime time) {
+    final now = DateTime.now();
+    final difference = now.difference(time);
+
+    if (difference.inMinutes < 1) {
+      return 'только что';
+    } else if (difference.inHours < 1) {
+      return '${difference.inMinutes} мин назад';
+    } else if (difference.inDays < 1) {
+      return '${difference.inHours} ч назад';
+    } else {
+      return '${difference.inDays} дн назад';
+    }
   }
 }

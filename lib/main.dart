@@ -8,6 +8,9 @@ import 'routes/app_router.dart';
 import 'core/theme/app_theme.dart';
 import 'data/database/database.dart';
 import 'presentation/providers/home_provider.dart';
+import 'presentation/providers/qr_provider.dart';
+import 'presentation/providers/sync_provider.dart';
+import 'services/api_service.dart';
 
 /// Точка входа в приложение
 void main() async {
@@ -21,16 +24,27 @@ void main() async {
   // Инициализация базы данных Drift
   final database = AppDatabase();
 
-  runApp(MyApp(database: database));
+  // Инициализация API сервиса
+  // TODO: Изменить baseUrl на production URL
+  final apiService = ApiService(
+    baseUrl: 'http://localhost:8000',
+  );
+
+  runApp(MyApp(
+    database: database,
+    apiService: apiService,
+  ));
 }
 
 /// Корневой виджет приложения
 class MyApp extends StatelessWidget {
   final AppDatabase database;
+  final ApiService apiService;
 
   const MyApp({
     super.key,
     required this.database,
+    required this.apiService,
   });
 
   @override
@@ -39,9 +53,25 @@ class MyApp extends StatelessWidget {
       providers: [
         // Провайдер базы данных
         Provider<AppDatabase>.value(value: database),
+        // Провайдер API сервиса
+        Provider<ApiService>.value(value: apiService),
         // Провайдер главного экрана
         ChangeNotifierProvider(
           create: (context) => HomeProvider(database),
+        ),
+        // Провайдер QR генерации
+        ChangeNotifierProvider(
+          create: (context) => QRProvider(
+            database: database,
+            apiService: apiService,
+          ),
+        ),
+        // Провайдер синхронизации
+        ChangeNotifierProvider(
+          create: (context) => SyncProvider(
+            database: database,
+            apiService: apiService,
+          ),
         ),
       ],
       child: MaterialApp.router(

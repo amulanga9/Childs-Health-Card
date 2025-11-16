@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import '../../data/database/database.dart';
 import '../../data/database/daos/episode_dao.dart';
@@ -6,10 +7,12 @@ import '../../data/database/daos/intake_dao.dart';
 import '../../data/database/daos/test_dao.dart';
 import '../../data/database/daos/procedure_dao.dart';
 import '../../data/database/daos/attachment_dao.dart';
+import '../../services/api_service.dart';
 
 /// Provider для управления состоянием экрана деталей эпизода
 class EpisodeDetailProvider with ChangeNotifier {
   final AppDatabase _database;
+  final ApiService? _apiService;
   final int episodeId;
 
   late final EpisodeDao _episodeDao;
@@ -51,7 +54,15 @@ class EpisodeDetailProvider with ChangeNotifier {
   bool _isLoading = false;
   bool get isLoading => _isLoading;
 
-  EpisodeDetailProvider(this._database, this.episodeId) {
+  /// Состояние загрузки файла
+  bool _isUploadingFile = false;
+  bool get isUploadingFile => _isUploadingFile;
+
+  EpisodeDetailProvider(
+    this._database,
+    this.episodeId, {
+    ApiService? apiService,
+  }) : _apiService = apiService {
     _episodeDao = _database.episodeDao;
     _prescriptionDao = _database.prescriptionDao;
     _intakeDao = _database.intakeDao;
@@ -252,6 +263,65 @@ class EpisodeDetailProvider with ChangeNotifier {
       notifyListeners();
     } catch (e) {
       debugPrint('Ошибка удаления вложения: $e');
+    }
+  }
+
+  /// Добавить вложение с загрузкой в облако
+  Future<bool> addAttachmentWithUpload({
+    required File file,
+    required String kind,
+  }) async {
+    if (_apiService == null) {
+      // Если нет API сервиса, сохраняем только локально
+      await addAttachment(
+        kind: kind,
+        localPath: file.path,
+      );
+      return true;
+    }
+
+    _isUploadingFile = true;
+    notifyListeners();
+
+    try {
+      // Загружаем файл в Object Storage
+      final uploadResponse = await _apiService!.uploadFile(
+        episodeId: episodeId,
+        file: file,
+      );
+
+      if (uploadResponse.success) {
+        // Создаём запись о вложении с cloud_key
+        await _attachmentDao.createAttachment(
+          AttachmentsCompanion.insert(
+            episodeId: episodeId,
+            kind: kind,
+            localPath: file.path,
+            cloudKey: uploadResponse.cloudKey,
+            atDatetime: DateTime.now(),
+          ),
+        );
+
+        _attachments = await _attachmentDao.getAttachmentsByEpisodeId(episodeId);
+        _isUploadingFile = false;
+        notifyListeners();
+        return true;
+      } else {
+        _isUploadingFile = false;
+        notifyListeners();
+        return false;
+      }
+    } catch (e) {
+      debugPrint('Ошибка загрузки файла: $e');
+      _isUploadingFile = false;
+      notifyListeners();
+
+      // В случае ошибки сохраняем локально
+      await addAttachment(
+        kind: kind,
+        localPath: file.path,
+      );
+      return false;
     }
   }
 
