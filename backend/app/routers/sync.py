@@ -7,6 +7,7 @@ from typing import Dict
 from ..database import get_db
 from ..schemas import SyncRequest, SyncResponse
 from ..models import Child, Episode, Prescription, Intake, Test, Procedure, Attachment
+from ..auth import verify_api_key_header
 
 
 router = APIRouter(prefix="/sync", tags=["sync"])
@@ -45,9 +46,12 @@ def upsert_model(db: Session, model_class, data: dict) -> int:
 async def sync_data(
     request: SyncRequest,
     db: Session = Depends(get_db),
+    api_key: str = Depends(verify_api_key_header),
 ):
     """
     Синхронизация данных с мобильного приложения
+
+    Требует аутентификации: добавьте заголовок X-API-Key
 
     Принимает все данные из мобильного приложения и сохраняет в PostgreSQL.
     Использует upsert логику (создание или обновление по mobile_id).

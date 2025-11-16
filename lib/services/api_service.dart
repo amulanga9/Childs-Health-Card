@@ -1,16 +1,107 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
+import 'package:connectivity_plus/connectivity_plus.dart';
 import '../data/database/database.dart';
+import '../core/error_handler.dart';
 
 /// Сервис для работы с backend API
 class ApiService {
   final String baseUrl;
+  final String apiKey;
   final http.Client _client;
+  final Connectivity _connectivity;
+
+  // Настройки повторных попыток
+  static const int _maxRetries = 3;
+  static const Duration _initialRetryDelay = Duration(seconds: 1);
 
   ApiService({
     this.baseUrl = 'http://localhost:8000', // Изменить на production URL
-  }) : _client = http.Client();
+    this.apiKey = 'test-api-key', // API ключ для аутентификации
+  })  : _client = http.Client(),
+        _connectivity = Connectivity();
+
+  /// Проверка подключения к интернету
+  Future<bool> _checkConnectivity() async {
+    try {
+      final connectivityResult = await _connectivity.checkConnectivity();
+      return connectivityResult != ConnectivityResult.none;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /// Выполнение HTTP запроса с повторными попытками
+  Future<T> _executeWithRetry<T>(
+    Future<T> Function() request, {
+    int retries = _maxRetries,
+  }) async {
+    // Проверка подключения
+    final hasConnection = await _checkConnectivity();
+    if (!hasConnection) {
+      throw Exception('Нет подключения к интернету');
+    }
+
+    int attempt = 0;
+    Duration delay = _initialRetryDelay;
+
+    while (true) {
+      try {
+        return await request();
+      } catch (e) {
+        attempt++;
+
+        // Если достигли максимума попыток, бросаем исключение
+        if (attempt >= retries) {
+          rethrow;
+        }
+
+        // Проверяем, стоит ли повторять запрос
+        final shouldRetry = _shouldRetryError(e);
+        if (!shouldRetry) {
+          rethrow;
+        }
+
+        // Логируем попытку повтора
+        print('Retry attempt $attempt/$retries after ${delay.inSeconds}s');
+
+        // Ждём перед следующей попыткой (экспоненциальная задержка)
+        await Future.delayed(delay);
+        delay *= 2; // Удваиваем задержку с каждой попыткой
+      }
+    }
+  }
+
+  /// Проверка, следует ли повторить запрос при данной ошибке
+  bool _shouldRetryError(dynamic error) {
+    if (error is SocketException) {
+      return true; // Проблемы с сетью - повторяем
+    }
+    if (error is HttpException) {
+      return true; // HTTP ошибки - повторяем
+    }
+    if (error is TimeoutException) {
+      return true; // Таймаут - повторяем
+    }
+    if (error.toString().contains('Connection')) {
+      return true; // Проблемы с подключением - повторяем
+    }
+    return false; // Другие ошибки не повторяем
+  }
+
+  /// Получение заголовков с API ключом
+  Map<String, String> _getHeaders({bool includeApiKey = true}) {
+    final headers = {
+      'Content-Type': 'application/json',
+    };
+
+    if (includeApiKey) {
+      headers['X-API-Key'] = apiKey;
+    }
+
+    return headers;
+  }
 
   /// Синхронизация данных с сервером
   Future<Map<String, dynamic>> syncData({
@@ -22,29 +113,34 @@ class ApiService {
     required List<Procedure> procedures,
     required List<Attachment> attachments,
   }) async {
-    try {
-      final response = await _client.post(
-        Uri.parse('$baseUrl/sync'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'children': children.map((c) => _childToJson(c)).toList(),
-          'episodes': episodes.map((e) => _episodeToJson(e)).toList(),
-          'prescriptions': prescriptions.map((p) => _prescriptionToJson(p)).toList(),
-          'intakes': intakes.map((i) => _intakeToJson(i)).toList(),
-          'tests': tests.map((t) => _testToJson(t)).toList(),
-          'procedures': procedures.map((p) => _procedureToJson(p)).toList(),
-          'attachments': attachments.map((a) => _attachmentToJson(a)).toList(),
-        }),
-      );
+    return await _executeWithRetry(() async {
+      final response = await _client
+          .post(
+            Uri.parse('$baseUrl/sync'),
+            headers: _getHeaders(includeApiKey: true),
+            body: jsonEncode({
+              'children': children.map((c) => _childToJson(c)).toList(),
+              'episodes': episodes.map((e) => _episodeToJson(e)).toList(),
+              'prescriptions':
+                  prescriptions.map((p) => _prescriptionToJson(p)).toList(),
+              'intakes': intakes.map((i) => _intakeToJson(i)).toList(),
+              'tests': tests.map((t) => _testToJson(t)).toList(),
+              'procedures':
+                  procedures.map((p) => _procedureToJson(p)).toList(),
+              'attachments':
+                  attachments.map((a) => _attachmentToJson(a)).toList(),
+            }),
+          )
+          .timeout(const Duration(seconds: 30));
 
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
+      } else if (response.statusCode == 401 || response.statusCode == 403) {
+        throw Exception('Ошибка аутентификации: проверьте API ключ');
       } else {
         throw Exception('Ошибка синхронизации: ${response.statusCode}');
       }
-    } catch (e) {
-      throw Exception('Ошибка соединения: $e');
-    }
+    });
   }
 
   /// Генерация QR токена
@@ -54,26 +150,28 @@ class ApiService {
     String description = '',
     int expireHours = 48,
   }) async {
-    try {
-      final response = await _client.post(
-        Uri.parse('$baseUrl/qr/generate'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'child_id': childId,
-          'episode_id': episodeId,
-          'description': description,
-          'expire_hours': expireHours,
-        }),
-      );
+    return await _executeWithRetry(() async {
+      final response = await _client
+          .post(
+            Uri.parse('$baseUrl/qr/generate'),
+            headers: _getHeaders(includeApiKey: true),
+            body: jsonEncode({
+              'child_id': childId,
+              'episode_id': episodeId,
+              'description': description,
+              'expire_hours': expireHours,
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
 
       if (response.statusCode == 200) {
         return QRTokenResponse.fromJson(jsonDecode(response.body));
+      } else if (response.statusCode == 401 || response.statusCode == 403) {
+        throw Exception('Ошибка аутентификации: проверьте API ключ');
       } else {
         throw Exception('Ошибка генерации QR: ${response.statusCode}');
       }
-    } catch (e) {
-      throw Exception('Ошибка соединения: $e');
-    }
+    });
   }
 
   /// Загрузка файла на сервер
@@ -107,12 +205,18 @@ class ApiService {
   /// Деактивация QR токена
   Future<bool> invalidateQRToken(String token) async {
     try {
-      final response = await _client.delete(
-        Uri.parse('$baseUrl/qr/$token'),
-      );
+      return await _executeWithRetry(() async {
+        final response = await _client
+            .delete(
+              Uri.parse('$baseUrl/qr/$token'),
+              headers: _getHeaders(includeApiKey: true),
+            )
+            .timeout(const Duration(seconds: 10));
 
-      return response.statusCode == 200;
+        return response.statusCode == 200;
+      });
     } catch (e) {
+      print('Error invalidating QR token: $e');
       return false;
     }
   }

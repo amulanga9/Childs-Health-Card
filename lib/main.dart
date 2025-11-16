@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'routes/app_router.dart';
 import 'core/theme/app_theme.dart';
+import 'core/error_handler.dart';
 import 'data/database/database.dart';
 import 'presentation/providers/home_provider.dart';
 import 'presentation/providers/qr_provider.dart';
@@ -16,30 +17,33 @@ import 'services/api_service.dart';
 
 /// Точка входа в приложение
 void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+  // Запуск приложения с глобальным обработчиком ошибок
+  ErrorHandler.runAppWithErrorHandling(() async {
+    WidgetsFlutterBinding.ensureInitialized();
 
-  // Инициализация локализации дат (для календаря)
-  await initializeDateFormatting('ru_RU', null);
-  await initializeDateFormatting('uz_UZ', null);
-  await initializeDateFormatting('en_US', null);
+    // Инициализация локализации дат (для календаря)
+    await initializeDateFormatting('ru_RU', null);
+    await initializeDateFormatting('uz_UZ', null);
+    await initializeDateFormatting('en_US', null);
 
-  // Инициализация базы данных Drift
-  final database = AppDatabase();
+    // Инициализация базы данных Drift
+    final database = AppDatabase();
 
-  // Инициализация SharedPreferences
-  final prefs = await SharedPreferences.getInstance();
+    // Инициализация SharedPreferences
+    final prefs = await SharedPreferences.getInstance();
 
-  // Инициализация API сервиса
-  // TODO: Изменить baseUrl на production URL
-  final apiService = ApiService(
-    baseUrl: 'http://localhost:8000',
-  );
+    // Инициализация API сервиса
+    // TODO: Изменить baseUrl на production URL
+    final apiService = ApiService(
+      baseUrl: 'http://localhost:8000',
+    );
 
-  runApp(MyApp(
-    database: database,
-    apiService: apiService,
-    prefs: prefs,
-  ));
+    runApp(MyApp(
+      database: database,
+      apiService: apiService,
+      prefs: prefs,
+    ));
+  });
 }
 
 /// Корневой виджет приложения

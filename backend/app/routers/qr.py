@@ -22,6 +22,7 @@ from ..schemas import (
 from ..models import QRToken, Child, Episode, Prescription, Test, Procedure, Attachment
 from ..services.qr_service import qr_service
 from ..config import settings
+from ..auth import verify_api_key_header
 
 
 router = APIRouter(prefix="/qr", tags=["qr"])
@@ -31,9 +32,12 @@ router = APIRouter(prefix="/qr", tags=["qr"])
 async def generate_qr_token(
     request: QRTokenCreate,
     db: Session = Depends(get_db),
+    api_key: str = Depends(verify_api_key_header),
 ):
     """
     Генерация QR токена для доступа врача
+
+    Требует аутентификации: добавьте заголовок X-API-Key
 
     Args:
         request: Данные для создания токена
@@ -190,9 +194,12 @@ async def get_qr_data(
 async def invalidate_qr_token(
     token: str,
     db: Session = Depends(get_db),
+    api_key: str = Depends(verify_api_key_header),
 ):
     """
     Деактивация QR токена
+
+    Требует аутентификации: добавьте заголовок X-API-Key
 
     Args:
         token: QR токен для деактивации
