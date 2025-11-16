@@ -61,14 +61,15 @@
 
 ### 2. Episodes (Эпизоды болезни)
 
-Таблица эпизодов заболеваний.
+Таблица эпизодов заболеваний с поддержкой цепочек (когда одна болезнь переросла в другую).
 
-| Поле       | Тип       | Описание                                  | Ограничения             |
-|------------|-----------|-------------------------------------------|-------------------------|
-| id         | INTEGER   | Уникальный идентификатор                  | PRIMARY KEY, AUTO INC   |
-| child_id   | INTEGER   | Внешний ключ на ребёнка                   | NOT NULL, FK→Children   |
-| diagnosis  | TEXT      | Диагноз (название болезни)                | NOT NULL, 1-200 chars   |
-| start_date | DATETIME  | Дата начала болезни                       | NOT NULL                |
+| Поле             | Тип       | Описание                                  | Ограничения             |
+|------------------|-----------|-------------------------------------------|-------------------------|
+| id               | INTEGER   | Уникальный идентификатор                  | PRIMARY KEY, AUTO INC   |
+| child_id         | INTEGER   | Внешний ключ на ребёнка                   | NOT NULL, FK→Children   |
+| parent_episode_id| INTEGER   | Родительский эпизод (для цепочек)         | NULLABLE, FK→Episodes   |
+| diagnosis        | TEXT      | Диагноз (название болезни)                | NOT NULL, 1-200 chars   |
+| start_date       | DATETIME  | Дата начала болезни                       | NOT NULL                |
 | end_date   | DATETIME  | Дата окончания (null = активная)          | NULLABLE                |
 | status     | TEXT      | Статус: active/recovered/chronic          | DEFAULT 'active'        |
 | notes      | TEXT      | Заметки и описание                        | DEFAULT ''              |

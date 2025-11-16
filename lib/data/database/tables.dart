@@ -33,12 +33,17 @@ class Children extends Table {
 
 /// Таблица эпизодов болезни
 /// Хранит информацию о заболеваниях ребёнка
+/// Поддерживает цепочки эпизодов через parent_episode_id
 class Episodes extends Table {
   /// Уникальный идентификатор
   IntColumn get id => integer().autoIncrement()();
 
   /// Внешний ключ на ребёнка
   IntColumn get childId => integer().references(Children, #id, onDelete: KeyAction.cascade)();
+
+  /// Родительский эпизод (если болезнь переросла в новое заболевание)
+  /// Например: ОРВИ → Бронхит → Пневмония
+  IntColumn get parentEpisodeId => integer().nullable().references(Episodes, #id, onDelete: KeyAction.setNull)();
 
   /// Диагноз (название болезни)
   TextColumn get diagnosis => text().withLength(min: 1, max: 200)();
@@ -185,6 +190,40 @@ class Attachments extends Table {
 
   /// Дата и время создания вложения
   DateTimeColumn get atDatetime => dateTime().withDefault(currentDateAndTime)();
+
+  /// Дата создания записи
+  DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
+}
+
+/// Таблица QR-токенов
+/// Хранит токены для быстрого доступа к медицинской информации через QR-код
+/// Используется для передачи врачам, медперсоналу
+class QRTokens extends Table {
+  /// Уникальный идентификатор
+  IntColumn get id => integer().autoIncrement()();
+
+  /// Внешний ключ на ребёнка
+  IntColumn get childId => integer().references(Children, #id, onDelete: KeyAction.cascade)();
+
+  /// Внешний ключ на конкретный эпизод (опционально)
+  /// Если null - токен даёт доступ ко всей истории ребёнка
+  IntColumn get episodeId => integer().nullable().references(Episodes, #id, onDelete: KeyAction.cascade)();
+
+  /// Уникальный токен (UUID или хеш)
+  /// Используется в URL или QR-коде для доступа к данным
+  TextColumn get token => text().withLength(min: 16, max: 128).unique()();
+
+  /// Дата и время истечения токена
+  /// После этой даты токен становится недействительным
+  DateTimeColumn get expiresAt => dateTime()();
+
+  /// Флаг активности токена
+  /// false = токен инвалидирован вручную
+  BoolColumn get isActive => boolean().withDefault(const Constant(true))();
+
+  /// Описание токена (для чего создан)
+  /// Например: "Для врача Иванова", "Для детского сада"
+  TextColumn get description => text().withDefault(const Constant(''))();
 
   /// Дата создания записи
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();

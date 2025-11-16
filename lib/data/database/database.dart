@@ -12,6 +12,7 @@ import 'daos/intake_dao.dart';
 import 'daos/test_dao.dart';
 import 'daos/procedure_dao.dart';
 import 'daos/attachment_dao.dart';
+import 'daos/qr_dao.dart';
 
 part 'database.g.dart';
 
@@ -26,6 +27,7 @@ part 'database.g.dart';
     Tests,
     Procedures,
     Attachments,
+    QRTokens,
   ],
   daos: [
     ChildDao,
@@ -35,13 +37,14 @@ part 'database.g.dart';
     TestDao,
     ProcedureDao,
     AttachmentDao,
+    QrDao,
   ],
 )
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -50,10 +53,14 @@ class AppDatabase extends _$AppDatabase {
           await m.createAll();
         },
         onUpgrade: (Migrator m, int from, int to) async {
-          // Миграции для будущих версий
-          // if (from == 1 && to == 2) {
-          //   await m.addColumn(children, children.someNewColumn);
-          // }
+          // Миграция с версии 1 на 2
+          if (from == 1 && to == 2) {
+            // Добавляем поле parent_episode_id в Episodes
+            await m.addColumn(episodes, episodes.parentEpisodeId);
+
+            // Создаём таблицу QRTokens
+            await m.createTable(qRTokens);
+          }
         },
         beforeOpen: (details) async {
           // Включение внешних ключей в SQLite

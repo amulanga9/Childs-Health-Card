@@ -136,4 +136,200 @@ class EpisodeDao extends DatabaseAccessor<AppDatabase> with _$EpisodeDaoMixin {
           ..orderBy([(t) => OrderingTerm(expression: t.startDate, mode: OrderingMode.desc)]))
         .watch();
   }
+
+  // ============================================
+  // МЕТОДЫ ДЛЯ РАБОТЫ С ЦЕПОЧКАМИ ЭПИЗОДОВ
+  // ============================================
+
+  /// Создать эпизод с родительским эпизодом
+  /// Используется когда одна болезнь переросла в другую
+  ///
+  /// Пример: ОРВИ → Бронхит → Пневмония
+  Future<int> createEpisodeWithParent({
+    required int childId,
+    required int parentEpisodeId,
+    required String diagnosis,
+    required DateTime startDate,
+    String notes = '',
+  }) async {
+    // Проверяем что родительский эпизод существует
+    final parent = await getEpisodeById(parentEpisodeId);
+    if (parent == null) {
+      throw Exception('Родительский эпизод не найден');
+    }
+
+    // Проверяем что родитель относится к тому же ребёнку
+    if (parent.childId != childId) {
+      throw Exception('Родительский эпизод принадлежит другому ребёнку');
+    }
+
+    return await createEpisode(
+      EpisodesCompanion.insert(
+        childId: childId,
+        parentEpisodeId: Value(parentEpisodeId),
+        diagnosis: diagnosis,
+        startDate: startDate,
+        notes: Value(notes),
+      ),
+    );
+  }
+
+  /// Получить всю цепочку эпизодов для данного эпизода
+  /// Возвращает список от самого раннего до текущего
+  ///
+  /// Пример: [ОРВИ, Бронхит, Пневмония]
+  Future<List<Episode>> getEpisodesChain(int episodeId) async {
+    final chain = <Episode>[];
+    Episode? current = await getEpisodeById(episodeId);
+
+    // Двигаемся вверх по цепочке к корню
+    while (current != null) {
+      chain.insert(0, current); // Добавляем в начало
+      if (current.parentEpisodeId != null) {
+        current = await getEpisodeById(current.parentEpisodeId!);
+      } else {
+        current = null;
+      }
+    }
+
+    return chain;
+  }
+
+  /// Получить дочерние эпизоды (те, что переросли из данного)
+  Future<List<Episode>> getChildEpisodes(int parentEpisodeId) {
+    return (select(episodes)
+          ..where((t) => t.parentEpisodeId.equals(parentEpisodeId))
+          ..orderBy([(t) => OrderingTerm(expression: t.startDate)]))
+        .get();
+  }
+
+  /// Получить корневой эпизод цепочки
+  Future<Episode> getRootEpisode(int episodeId) async {
+    final chain = await getEpisodesChain(episodeId);
+    return chain.first;
+  }
+
+  /// Проверить, является ли эпизод частью цепочки
+  Future<bool> isPartOfChain(int episodeId) async {
+    final episode = await getEpisodeById(episodeId);
+    if (episode == null) return false;
+
+    // Есть родитель или есть дети
+    if (episode.parentEpisodeId != null) return true;
+
+    final children = await getChildEpisodes(episodeId);
+    return children.isNotEmpty;
+  }
+
+  // ============================================
+  // РАСШИРЕННАЯ СТАТИСТИКА
+  // ============================================
+
+  /// Получить годовую статистику по эпизодам для ребёнка
+  ///
+  /// Возвращает:
+  /// - count: количество эпизодов за год
+  /// - averageDuration: средняя длительность в днях
+  /// - topDiagnoses: топ диагнозов с количеством
+  Future<Map<String, dynamic>> getYearlyStatsByChildId(int childId, int year) async {
+    final startOfYear = DateTime(year, 1, 1);
+    final endOfYear = DateTime(year, 12, 31, 23, 59, 59);
+
+    // Получаем все эпизоды за год
+    final yearEpisodes = await (select(episodes)
+          ..where((t) =>
+              t.childId.equals(childId) &
+              t.startDate.isBetweenValues(startOfYear, endOfYear)))
+        .get();
+
+    if (yearEpisodes.isEmpty) {
+      return {
+        'count': 0,
+        'averageDuration': 0.0,
+        'topDiagnoses': <Map<String, dynamic>>[],
+      };
+    }
+
+    // Средняя длительность
+    double totalDuration = 0;
+    int completedCount = 0;
+
+    for (final episode in yearEpisodes) {
+      if (episode.endDate != null) {
+        final duration = episode.endDate!.difference(episode.startDate).inDays;
+        totalDuration += duration;
+        completedCount++;
+      }
+    }
+
+    final averageDuration = completedCount > 0 ? totalDuration / completedCount : 0.0;
+
+    // Топ диагнозов
+    final diagnosisCount = <String, int>{};
+    for (final episode in yearEpisodes) {
+      diagnosisCount[episode.diagnosis] = (diagnosisCount[episode.diagnosis] ?? 0) + 1;
+    }
+
+    // Сортируем по количеству
+    final topDiagnoses = diagnosisCount.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    final topDiagnosesList = topDiagnoses
+        .take(10)
+        .map((e) => {'diagnosis': e.key, 'count': e.value})
+        .toList();
+
+    return {
+      'count': yearEpisodes.length,
+      'averageDuration': averageDuration,
+      'topDiagnoses': topDiagnosesList,
+    };
+  }
+
+  /// Получить статистику по месяцам за год
+  /// Возвращает количество эпизодов по месяцам
+  Future<Map<int, int>> getMonthlyStatsForYear(int childId, int year) async {
+    final startOfYear = DateTime(year, 1, 1);
+    final endOfYear = DateTime(year, 12, 31, 23, 59, 59);
+
+    final yearEpisodes = await (select(episodes)
+          ..where((t) =>
+              t.childId.equals(childId) &
+              t.startDate.isBetweenValues(startOfYear, endOfYear)))
+        .get();
+
+    final monthlyStats = <int, int>{};
+    for (int month = 1; month <= 12; month++) {
+      monthlyStats[month] = 0;
+    }
+
+    for (final episode in yearEpisodes) {
+      final month = episode.startDate.month;
+      monthlyStats[month] = (monthlyStats[month] ?? 0) + 1;
+    }
+
+    return monthlyStats;
+  }
+
+  /// Получить статистику по всем годам для ребёнка
+  Future<List<Map<String, dynamic>>> getAllYearsStats(int childId) async {
+    final allEpisodes = await getEpisodesByChildId(childId);
+
+    if (allEpisodes.isEmpty) return [];
+
+    // Определяем диапазон лет
+    final years = allEpisodes.map((e) => e.startDate.year).toSet().toList()..sort();
+
+    final yearlyStats = <Map<String, dynamic>>[];
+
+    for (final year in years) {
+      final stats = await getYearlyStatsByChildId(childId, year);
+      yearlyStats.add({
+        'year': year,
+        ...stats,
+      });
+    }
+
+    return yearlyStats;
+  }
 }
