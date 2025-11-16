@@ -1,0 +1,14 @@
+# Конфигурация build_runner для Drift
+targets:
+  $default:
+    builders:
+      drift_dev:
+        options:
+          # Генерировать SQL код для отладки
+          generate_connect_constructor: true
+          # Включить проверку SQL запросов
+          sql:
+            dialects:
+              - sqlite
+          # Генерировать Data классы
+          generate_data_classes: true

@@ -35,15 +35,17 @@ childs_health_card/
 │   │   └── localization/              # Вспомогательные функции локализации
 │   │
 │   ├── data/                          # Слой данных
-│   │   ├── models/                    # Модели данных
-│   │   │   ├── child.dart             # Модель ребёнка
-│   │   │   ├── illness.dart           # Модель болезни
-│   │   │   ├── doctor_visit.dart      # Модель визита к врачу
-│   │   │   ├── medical_test.dart      # Модель анализа
-│   │   │   ├── procedure.dart         # Модель процедуры
-│   │   │   └── medication.dart        # Модель лекарства
-│   │   ├── repositories/              # Репозитории (работа с данными)
-│   │   └── datasources/               # Источники данных (Hive, API)
+│   │   └── database/                  # База данных Drift
+│   │       ├── tables.dart            # Определения таблиц
+│   │       ├── database.dart          # Конфигурация БД
+│   │       └── daos/                  # Data Access Objects
+│   │           ├── child_dao.dart     # DAO для детей
+│   │           ├── episode_dao.dart   # DAO для эпизодов
+│   │           ├── prescription_dao.dart
+│   │           ├── intake_dao.dart
+│   │           ├── test_dao.dart
+│   │           ├── procedure_dao.dart
+│   │           └── attachment_dao.dart
 │   │
 │   ├── presentation/                  # Слой представления (UI)
 │   │   ├── screens/                   # Экраны приложения
@@ -84,73 +86,83 @@ childs_health_card/
 └── README.md                          # Документация
 ```
 
-## 📊 Модели данных
+## 📊 Модели данных (SQLite + Drift)
 
-### Child (Ребёнок)
+Приложение использует **SQLite** с ORM **Drift** для типобезопасного доступа к данным.
+
+### Children (Дети)
 ```dart
-- id: String
-- name: String
+- id: int (PRIMARY KEY)
+- name: String (1-100 chars)
 - birthDate: DateTime
-- gender: Gender (male/female)
-- photoPath: String?
-- createdAt: DateTime
-- updatedAt: DateTime
+- bloodGroup: String? (A+, B-, O+, AB- и т.д.)
+- allergies: JSON array (список аллергий)
+- chronicConditions: JSON array (хронические заболевания)
+- avatar: String? (путь к файлу)
 ```
 
-### Illness (Болезнь)
+### Episodes (Эпизоды болезни)
 ```dart
-- id: String
-- childId: String
-- title: String
-- description: String
+- id: int (PRIMARY KEY)
+- childId: int (FK → Children)
+- diagnosis: String (название болезни)
+- startDate: DateTime
+- endDate: DateTime? (null = активная)
+- status: String (active/recovered/chronic)
+- notes: String (описание)
+```
+
+### Prescriptions (Назначения лекарств)
+```dart
+- id: int (PRIMARY KEY)
+- episodeId: int (FK → Episodes)
+- drugName: String (название препарата)
+- dose: String (дозировка)
+- schedule: String (расписание приёма)
 - startDate: DateTime
 - endDate: DateTime?
-- status: IllnessStatus (active/recovered/chronic)
-- symptoms: List<String>
 ```
 
-### DoctorVisit (Визит к врачу)
+### Intakes (Приёмы лекарств)
 ```dart
-- id: String
-- illnessId: String
-- visitDate: DateTime
-- doctorName: String
-- specialization: String
-- diagnosis: String
-- recommendations: String
+- id: int (PRIMARY KEY)
+- prescriptionId: int (FK → Prescriptions)
+- atDatetime: DateTime (дата и время приёма)
+- taken: bool (принято или нет)
+- reasonSkip: String? (причина пропуска)
 ```
 
-### MedicalTest (Анализ)
+### Tests (Анализы)
 ```dart
-- id: String
-- illnessId: String
-- testType: String
-- testDate: DateTime
-- results: Map<String, String>
-- laboratory: String?
+- id: int (PRIMARY KEY)
+- episodeId: int (FK → Episodes)
+- kind: String (тип анализа)
+- atDatetime: DateTime
+- resultText: String (результаты)
+- attachmentId: int? (FK → Attachments)
 ```
 
-### MedicalProcedure (Процедура)
+### Procedures (Процедуры)
 ```dart
-- id: String
-- illnessId: String
-- title: String
-- procedureDate: DateTime
-- location: String?
-- performedBy: String?
+- id: int (PRIMARY KEY)
+- episodeId: int (FK → Episodes)
+- kind: String (тип процедуры)
+- atDatetime: DateTime
+- status: String (scheduled/completed/cancelled)
+- note: String
 ```
 
-### Medication (Лекарство)
+### Attachments (Вложения)
 ```dart
-- id: String
-- illnessId: String
-- name: String
-- dosage: String
-- frequency: String
-- startDate: DateTime
-- endDate: DateTime?
-- isActive: bool
+- id: int (PRIMARY KEY)
+- episodeId: int (FK → Episodes)
+- kind: String (photo/document/test_result/...)
+- localPath: String (путь к файлу)
+- cloudKey: String? (ключ в облаке)
+- atDatetime: DateTime
 ```
+
+📚 **Подробная документация:** см. [DATABASE.md](DATABASE.md)
 
 ## 🎨 Экраны приложения
 
@@ -197,8 +209,8 @@ childs_health_card/
 - **flutter** - Фреймворк для кроссплатформенной разработки
 - **provider** ^6.1.1 - State management
 - **go_router** ^13.0.0 - Навигация
-- **hive** ^2.2.3 - Локальная база данных
-- **hive_flutter** ^1.1.0 - Flutter интеграция Hive
+- **drift** ^2.14.1 - SQLite ORM (типобезопасный)
+- **sqlite3_flutter_libs** ^0.5.18 - SQLite библиотеки
 
 ### UI компоненты
 - **table_calendar** ^3.0.9 - Календарь
@@ -237,7 +249,7 @@ cd childs-health-card
 flutter pub get
 ```
 
-3. Сгенерировать код (для Hive адаптеров):
+3. Сгенерировать код (для Drift моделей и DAO):
 ```bash
 flutter pub run build_runner build --delete-conflicting-outputs
 ```
@@ -266,16 +278,19 @@ flutter run
 
 ## 📝 TODO
 
+- [x] Настроить SQLite + Drift ORM
+- [x] Создать таблицы и DAO для всех сущностей
+- [x] Добавить тестовые данные (ОРВИ, Ангина, Бронхит)
 - [ ] Реализовать Provider для state management
-- [ ] Добавить репозитории для работы с данными
-- [ ] Настроить Hive адаптеры
-- [ ] Реализовать облачную синхронизацию
+- [ ] Интегрировать DAO с UI экранами
+- [ ] Реализовать облачную синхронизацию (Firebase/AWS)
 - [ ] Добавить экспорт данных в PDF
 - [ ] Реализовать уведомления о приёме лекарств
-- [ ] Добавить поддержку вложений (фото результатов анализов)
+- [ ] Добавить UI для загрузки вложений (фото, документы)
 - [ ] Реализовать поиск по медицинским записям
 - [ ] Добавить фильтры и сортировку
 - [ ] Написать unit и widget тесты
+- [ ] Добавить индексы БД для оптимизации
 
 ## 🤝 Участие в разработке
 
