@@ -1,0 +1,71 @@
+{
+  "@@locale": "uz",
+
+  "appTitle": "Bola sog'ligi kartasi",
+
+  "home": "Asosiy",
+  "calendar": "Taqvim",
+  "statistics": "Statistika",
+  "settings": "Sozlamalar",
+
+  "children": "Bolalar",
+  "addChild": "Bola qo'shish",
+  "childName": "Bola ismi",
+  "childBirthdate": "Tug'ilgan sana",
+  "childGender": "Jinsi",
+  "male": "O'g'il bola",
+  "female": "Qiz bola",
+
+  "illnesses": "Kasalliklar",
+  "illness": "Kasallik",
+  "addIllness": "Kasallik qo'shish",
+  "illnessTitle": "Kasallik nomi",
+  "illnessDescription": "Tavsif",
+  "illnessStartDate": "Boshlanish sanasi",
+  "illnessEndDate": "Tugash sanasi",
+  "illnessStatus": "Holati",
+  "active": "Faol",
+  "recovered": "Tuzaldi",
+
+  "visits": "Shifokor tashriflari",
+  "addVisit": "Tashrif qo'shish",
+  "visitDate": "Tashrif sanasi",
+  "doctor": "Shifokor",
+  "diagnosis": "Tashxis",
+  "recommendations": "Tavsiyalar",
+
+  "tests": "Tahlillar",
+  "addTest": "Tahlil qo'shish",
+  "testType": "Tahlil turi",
+  "testDate": "Tahlil sanasi",
+  "testResults": "Natijalar",
+
+  "procedures": "Muolajalar",
+  "addProcedure": "Muolaja qo'shish",
+  "procedureTitle": "Muolaja",
+  "procedureDate": "Sana",
+
+  "medications": "Dorilar",
+  "addMedication": "Dori qo'shish",
+  "medicationName": "Dori nomi",
+  "dosage": "Dozasi",
+  "frequency": "Qabul qilish chastotasi",
+  "startDate": "Boshlanish sanasi",
+  "endDate": "Tugash sanasi",
+
+  "language": "Til",
+  "pinCode": "PIN kod",
+  "enablePin": "PIN kod himoyasini yoqish",
+  "cloudSync": "Bulut sinxronizatsiyasi",
+  "backup": "Zaxira nusxa",
+  "restore": "Tiklash",
+
+  "save": "Saqlash",
+  "cancel": "Bekor qilish",
+  "delete": "O'chirish",
+  "edit": "Tahrirlash",
+  "confirm": "Tasdiqlash",
+
+  "noData": "Ma'lumot yo'q",
+  "selectChild": "Bolani tanlang"
+}

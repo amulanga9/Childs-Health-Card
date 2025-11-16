@@ -1,0 +1,74 @@
+{
+  "@@locale": "en",
+
+  "appTitle": "Child's Health Card",
+  "@appTitle": {
+    "description": "Application title"
+  },
+
+  "home": "Home",
+  "calendar": "Calendar",
+  "statistics": "Statistics",
+  "settings": "Settings",
+
+  "children": "Children",
+  "addChild": "Add Child",
+  "childName": "Child's Name",
+  "childBirthdate": "Date of Birth",
+  "childGender": "Gender",
+  "male": "Male",
+  "female": "Female",
+
+  "illnesses": "Illnesses",
+  "illness": "Illness",
+  "addIllness": "Add Illness",
+  "illnessTitle": "Illness Title",
+  "illnessDescription": "Description",
+  "illnessStartDate": "Start Date",
+  "illnessEndDate": "End Date",
+  "illnessStatus": "Status",
+  "active": "Active",
+  "recovered": "Recovered",
+
+  "visits": "Doctor Visits",
+  "addVisit": "Add Visit",
+  "visitDate": "Visit Date",
+  "doctor": "Doctor",
+  "diagnosis": "Diagnosis",
+  "recommendations": "Recommendations",
+
+  "tests": "Tests & Analyses",
+  "addTest": "Add Test",
+  "testType": "Test Type",
+  "testDate": "Test Date",
+  "testResults": "Results",
+
+  "procedures": "Procedures",
+  "addProcedure": "Add Procedure",
+  "procedureTitle": "Procedure",
+  "procedureDate": "Date",
+
+  "medications": "Medications",
+  "addMedication": "Add Medication",
+  "medicationName": "Medication Name",
+  "dosage": "Dosage",
+  "frequency": "Frequency",
+  "startDate": "Start Date",
+  "endDate": "End Date",
+
+  "language": "Language",
+  "pinCode": "PIN Code",
+  "enablePin": "Enable PIN Protection",
+  "cloudSync": "Cloud Sync",
+  "backup": "Backup",
+  "restore": "Restore",
+
+  "save": "Save",
+  "cancel": "Cancel",
+  "delete": "Delete",
+  "edit": "Edit",
+  "confirm": "Confirm",
+
+  "noData": "No data available",
+  "selectChild": "Select a child"
+}

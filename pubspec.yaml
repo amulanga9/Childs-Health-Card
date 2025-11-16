@@ -1,0 +1,66 @@
+name: childs_health_card
+description: Приложение для учёта здоровья детей - визиты, анализы, процедуры, лекарства
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Локализация
+  flutter_localizations:
+    sdk: flutter
+  intl: ^0.18.1
+
+  # State Management
+  provider: ^6.1.1
+
+  # Навигация
+  go_router: ^13.0.0
+
+  # Локальная база данных
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+
+  # Работа с датами
+  table_calendar: ^3.0.9
+
+  # UI компоненты
+  flutter_svg: ^2.0.9
+  cached_network_image: ^3.3.1
+
+  # Графики и статистика
+  fl_chart: ^0.66.0
+
+  # Утилиты
+  uuid: ^4.3.3
+  path_provider: ^2.1.2
+  shared_preferences: ^2.2.2
+
+  # Безопасность (PIN код)
+  local_auth: ^2.1.8
+  flutter_secure_storage: ^9.0.0
+
+  # Иконки
+  cupertino_icons: ^1.0.6
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+  hive_generator: ^2.0.1
+  build_runner: ^2.4.8
+
+flutter:
+  uses-material-design: true
+
+  # Ресурсы приложения
+  assets:
+    - assets/images/
+    - assets/icons/
+
+  # Локализация
+  generate: true

@@ -1,0 +1,71 @@
+{
+  "@@locale": "ru",
+
+  "appTitle": "Карта здоровья ребёнка",
+
+  "home": "Главная",
+  "calendar": "Календарь",
+  "statistics": "Статистика",
+  "settings": "Настройки",
+
+  "children": "Дети",
+  "addChild": "Добавить ребёнка",
+  "childName": "Имя ребёнка",
+  "childBirthdate": "Дата рождения",
+  "childGender": "Пол",
+  "male": "Мальчик",
+  "female": "Девочка",
+
+  "illnesses": "Болезни",
+  "illness": "Болезнь",
+  "addIllness": "Добавить болезнь",
+  "illnessTitle": "Название болезни",
+  "illnessDescription": "Описание",
+  "illnessStartDate": "Дата начала",
+  "illnessEndDate": "Дата окончания",
+  "illnessStatus": "Статус",
+  "active": "Активна",
+  "recovered": "Выздоровел",
+
+  "visits": "Визиты к врачу",
+  "addVisit": "Добавить визит",
+  "visitDate": "Дата визита",
+  "doctor": "Врач",
+  "diagnosis": "Диагноз",
+  "recommendations": "Рекомендации",
+
+  "tests": "Анализы",
+  "addTest": "Добавить анализ",
+  "testType": "Тип анализа",
+  "testDate": "Дата анализа",
+  "testResults": "Результаты",
+
+  "procedures": "Процедуры",
+  "addProcedure": "Добавить процедуру",
+  "procedureTitle": "Процедура",
+  "procedureDate": "Дата",
+
+  "medications": "Лекарства",
+  "addMedication": "Добавить лекарство",
+  "medicationName": "Название лекарства",
+  "dosage": "Дозировка",
+  "frequency": "Частота приёма",
+  "startDate": "Дата начала",
+  "endDate": "Дата окончания",
+
+  "language": "Язык",
+  "pinCode": "PIN-код",
+  "enablePin": "Включить защиту PIN-кодом",
+  "cloudSync": "Облачная синхронизация",
+  "backup": "Резервная копия",
+  "restore": "Восстановить",
+
+  "save": "Сохранить",
+  "cancel": "Отмена",
+  "delete": "Удалить",
+  "edit": "Редактировать",
+  "confirm": "Подтвердить",
+
+  "noData": "Нет данных",
+  "selectChild": "Выберите ребёнка"
+}
