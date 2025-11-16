@@ -1,6 +1,6 @@
 import 'package:go_router/go_router.dart';
 import '../presentation/screens/home_screen.dart';
-import '../presentation/screens/episode_detail_screen.dart';
+import '../presentation/screens/episode_detail_screen_new.dart';
 
 /// Конфигурация маршрутов приложения
 /// Использует GoRouter для навигации
@@ -21,7 +21,7 @@ class AppRouter {
         name: 'episodeDetail',
         builder: (context, state) {
           final episodeId = int.parse(state.pathParameters['episodeId']!);
-          return EpisodeDetailScreen(episodeId: episodeId);
+          return EpisodeDetailScreenNew(episodeId: episodeId);
         },
       ),
 
