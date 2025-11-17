@@ -13,7 +13,11 @@ import 'presentation/providers/home_provider.dart';
 import 'presentation/providers/qr_provider.dart';
 import 'presentation/providers/sync_provider.dart';
 import 'presentation/providers/settings_provider.dart';
+import 'presentation/providers/admin_auth_provider.dart';
+import 'presentation/providers/admin_provider.dart';
+import 'presentation/providers/admin_logs_provider.dart';
 import 'services/api_service.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 /// Точка входа в приложение
 void main() async {
@@ -32,6 +36,9 @@ void main() async {
     // Инициализация SharedPreferences
     final prefs = await SharedPreferences.getInstance();
 
+    // Инициализация FlutterSecureStorage для админки
+    const secureStorage = FlutterSecureStorage();
+
     // Инициализация API сервиса
     // TODO: Изменить baseUrl на production URL
     final apiService = ApiService(
@@ -42,6 +49,7 @@ void main() async {
       database: database,
       apiService: apiService,
       prefs: prefs,
+      secureStorage: secureStorage,
     ));
   });
 }
@@ -51,12 +59,14 @@ class MyApp extends StatelessWidget {
   final AppDatabase database;
   final ApiService apiService;
   final SharedPreferences prefs;
+  final FlutterSecureStorage secureStorage;
 
   const MyApp({
     super.key,
     required this.database,
     required this.apiService,
     required this.prefs,
+    required this.secureStorage,
   });
 
   @override
@@ -91,6 +101,33 @@ class MyApp extends StatelessWidget {
             database: database,
             apiService: apiService,
           ),
+        ),
+
+        // ============ АДМИНСКИЕ ПРОВАЙДЕРЫ ============
+
+        // Провайдер авторизации админа
+        ChangeNotifierProvider(
+          create: (context) => AdminAuthProvider(
+            secureStorage: secureStorage,
+            prefs: prefs,
+          ),
+        ),
+        // Провайдер логов активности
+        ChangeNotifierProvider(
+          create: (context) => AdminLogsProvider(prefs: prefs),
+        ),
+        // Провайдер управления админкой
+        ChangeNotifierProxyProvider<AdminLogsProvider, AdminProvider>(
+          create: (context) => AdminProvider(
+            database: database,
+            logsProvider: context.read<AdminLogsProvider>(),
+          ),
+          update: (context, adminLogs, adminProvider) =>
+              adminProvider ??
+              AdminProvider(
+                database: database,
+                logsProvider: adminLogs,
+              ),
         ),
       ],
       child: Consumer<SettingsProvider>(
