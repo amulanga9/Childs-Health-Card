@@ -83,6 +83,22 @@ class ActivityLog {
         return '📥';
       case 'backup':
         return '💾';
+      case 'failed_login':
+        return '❌';
+      case 'lockout':
+        return '🔒';
+      case 'enable_2fa':
+        return '🛡️';
+      case 'disable_2fa':
+        return '⚠️';
+      case 'change_role':
+        return '👤';
+      case 'change_password':
+        return '🔐';
+      case 'reset_password':
+        return '🔄';
+      case 'backup_code_used':
+        return '🎫';
       default:
         return '📝';
     }
@@ -106,6 +122,22 @@ class ActivityLog {
         return 'Импорт';
       case 'backup':
         return 'Резервная копия';
+      case 'failed_login':
+        return 'Неудачный вход';
+      case 'lockout':
+        return 'Блокировка';
+      case 'enable_2fa':
+        return 'Включение 2FA';
+      case 'disable_2fa':
+        return 'Отключение 2FA';
+      case 'change_role':
+        return 'Смена роли';
+      case 'change_password':
+        return 'Смена пароля';
+      case 'reset_password':
+        return 'Сброс пароля';
+      case 'backup_code_used':
+        return 'Использован резервный код';
       default:
         return action;
     }
@@ -133,6 +165,8 @@ class ActivityLog {
         return 'Настройки';
       case 'system':
         return 'Система';
+      case 'security':
+        return 'Безопасность';
       default:
         return entityType;
     }

@@ -91,6 +91,168 @@ class AdminLogsProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  // ============== Логи безопасности ==============
+
+  /// Добавление лога неудачной попытки входа
+  Future<void> addFailedLoginLog(String adminName, {String? reason}) async {
+    await addLog(
+      action: 'failed_login',
+      entityType: 'security',
+      adminName: adminName,
+      entityName: reason ?? 'Неверный пароль',
+    );
+  }
+
+  /// Добавление лога блокировки из-за превышения попыток
+  Future<void> addLockoutLog(String adminName, Duration lockoutDuration) async {
+    await addLog(
+      action: 'lockout',
+      entityType: 'security',
+      adminName: adminName,
+      entityName: 'Блокировка на ${lockoutDuration.inMinutes} мин',
+      changes: {
+        'lockout_duration_minutes': lockoutDuration.inMinutes,
+      },
+    );
+  }
+
+  /// Добавление лога включения 2FA
+  Future<void> addEnable2FALog(String adminName) async {
+    await addLog(
+      action: 'enable_2fa',
+      entityType: 'security',
+      adminName: adminName,
+      entityName: 'Двухфакторная аутентификация включена',
+    );
+  }
+
+  /// Добавление лога отключения 2FA
+  Future<void> addDisable2FALog(String adminName) async {
+    await addLog(
+      action: 'disable_2fa',
+      entityType: 'security',
+      adminName: adminName,
+      entityName: 'Двухфакторная аутентификация отключена',
+    );
+  }
+
+  /// Добавление лога смены роли
+  Future<void> addChangeRoleLog(
+    String adminName,
+    String oldRole,
+    String newRole,
+  ) async {
+    await addLog(
+      action: 'change_role',
+      entityType: 'security',
+      adminName: adminName,
+      entityName: 'Смена роли: $oldRole → $newRole',
+      changes: {
+        'old_role': oldRole,
+        'new_role': newRole,
+      },
+    );
+  }
+
+  /// Добавление лога смены пароля
+  Future<void> addChangePasswordLog(String adminName) async {
+    await addLog(
+      action: 'change_password',
+      entityType: 'security',
+      adminName: adminName,
+      entityName: 'Пароль изменён',
+    );
+  }
+
+  /// Добавление лога сброса пароля
+  Future<void> addResetPasswordLog(String adminName) async {
+    await addLog(
+      action: 'reset_password',
+      entityType: 'security',
+      adminName: adminName,
+      entityName: 'Пароль сброшен к значению по умолчанию',
+    );
+  }
+
+  /// Добавление лога использования резервного кода 2FA
+  Future<void> addBackupCodeUsedLog(String adminName) async {
+    await addLog(
+      action: 'backup_code_used',
+      entityType: 'security',
+      adminName: adminName,
+      entityName: 'Использован резервный код 2FA',
+    );
+  }
+
+  /// Фильтрация логов безопасности
+  List<ActivityLog> getSecurityLogs() {
+    const securityActions = [
+      'failed_login',
+      'lockout',
+      'enable_2fa',
+      'disable_2fa',
+      'change_role',
+      'change_password',
+      'reset_password',
+      'backup_code_used',
+      'login',
+      'logout',
+    ];
+
+    return _logs.where((log) {
+      return securityActions.contains(log.action) ||
+          log.entityType == 'security';
+    }).toList();
+  }
+
+  /// Получение логов неудачных попыток входа
+  List<ActivityLog> getFailedLoginLogs({int days = 7}) {
+    final cutoff = DateTime.now().subtract(Duration(days: days));
+    return _logs.where((log) {
+      return log.action == 'failed_login' && log.timestamp.isAfter(cutoff);
+    }).toList();
+  }
+
+  /// Проверка подозрительной активности (много неудачных попыток входа)
+  bool hasSuspiciousActivity({int threshold = 10, int hours = 24}) {
+    final cutoff = DateTime.now().subtract(Duration(hours: hours));
+    final failedLogins = _logs.where((log) {
+      return log.action == 'failed_login' && log.timestamp.isAfter(cutoff);
+    }).length;
+
+    return failedLogins >= threshold;
+  }
+
+  /// Экспорт логов безопасности в JSON
+  String exportSecurityLogsToJson() {
+    final securityLogs = getSecurityLogs();
+    return jsonEncode({
+      'exported_at': DateTime.now().toIso8601String(),
+      'logs_count': securityLogs.length,
+      'logs': securityLogs.map((log) => log.toJson()).toList(),
+    });
+  }
+
+  /// Экспорт логов безопасности в CSV
+  String exportSecurityLogsToCsv() {
+    final securityLogs = getSecurityLogs();
+    final buffer = StringBuffer();
+
+    // Заголовки
+    buffer.writeln(
+      'ID,Действие,Администратор,Описание,Дата и время,Изменения',
+    );
+
+    // Данные
+    for (final log in securityLogs) {
+      buffer.writeln(
+        '${log.id},${log.action},${log.adminName},"${log.entityName ?? ""}",${log.timestamp},"${log.changes ?? ""}"',
+      );
+    }
+
+    return buffer.toString();
+  }
+
   /// Фильтрация логов по действию
   List<ActivityLog> filterByAction(String action) {
     return _logs.where((log) => log.action == action).toList();
