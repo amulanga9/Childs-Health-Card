@@ -2,362 +2,171 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../../data/models/admin_role.dart';
-import '../../data/models/two_factor_auth.dart';
+import '../../data/models/admin_security.dart';
 
-/// Провайдер для авторизации администратора с поддержкой ролей, 2FA и rate limiting
+/// Простой провайдер авторизации админа
 class AdminAuthProvider with ChangeNotifier {
-  final FlutterSecureStorage _secureStorage;
+  final FlutterSecureStorage _secure;
   final SharedPreferences _prefs;
 
-  bool _isAuthenticated = false;
-  String _adminName = 'Администратор';
-  DateTime? _lastLoginTime;
-  AdminRole _role = AdminRole.admin; // По умолчанию admin
-  TwoFactorAuth? _twoFactorAuth;
-  RateLimiter _rateLimiter = RateLimiter();
+  bool _isAuth = false;
+  String _name = 'Админ';
+  String _role = AdminRole.admin;
+  DateTime? _lastLogin;
 
-  static const String _adminPasswordKey = 'admin_password';
-  static const String _adminNameKey = 'admin_name';
-  static const String _adminRoleKey = 'admin_role';
-  static const String _lastLoginKey = 'admin_last_login';
-  static const String _twoFactorKey = 'admin_2fa';
-  static const String _rateLimiterKey = 'admin_rate_limiter';
-  static const String _defaultPassword = '0000';
+  SimpleRateLimiter _limiter = SimpleRateLimiter();
+  SecondFactor? _secondFactor;
+
+  static const _passKey = 'admin_pass';
+  static const _nameKey = 'admin_name';
+  static const _roleKey = 'admin_role';
+  static const _loginKey = 'last_login';
+  static const _limiterKey = 'rate_limit';
+  static const _secondKey = 'second_factor';
+  static const _defaultPass = '0000';
 
   AdminAuthProvider({
     required FlutterSecureStorage secureStorage,
     required SharedPreferences prefs,
-  })  : _secureStorage = secureStorage,
+  })  : _secure = secureStorage,
         _prefs = prefs {
-    _loadAdminData();
+    _load();
   }
 
-  // ============== Getters ==============
+  // Getters
+  bool get isAuth => _isAuth;
+  String get name => _name;
+  String get role => _role;
+  DateTime? get lastLogin => _lastLogin;
+  Permissions get perms => Permissions(_role);
 
-  bool get isAuthenticated => _isAuthenticated;
-  String get adminName => _adminName;
-  DateTime? get lastLoginTime => _lastLoginTime;
-  AdminRole get role => _role;
-  AdminPermissions get permissions => AdminPermissions(_role);
-  TwoFactorAuth? get twoFactorAuth => _twoFactorAuth;
-  RateLimiter get rateLimiter => _rateLimiter;
+  bool get isLocked => _limiter.isLocked;
+  int get attemptsLeft => _limiter.remainingAttempts;
+  String? get lockTime => _limiter.lockTimeRemaining;
 
-  bool get isAdmin => _role == AdminRole.admin;
-  bool get isModerator => _role == AdminRole.moderator;
-  bool get isViewer => _role == AdminRole.viewer;
+  bool get hasSecondFactor => _secondFactor?.enabled ?? false;
 
-  bool get is2FAEnabled => _twoFactorAuth?.isEnabled ?? false;
-  bool get isLockedOut => _rateLimiter.isLockedOut;
-  int get remainingAttempts => _rateLimiter.remainingAttempts;
-  Duration? get remainingLockoutTime => _rateLimiter.remainingLockoutTime;
+  Future<void> _load() async {
+    _name = _prefs.getString(_nameKey) ?? 'Админ';
+    _role = _prefs.getString(_roleKey) ?? AdminRole.admin;
 
-  // ============== Загрузка данных ==============
+    final loginStr = _prefs.getString(_loginKey);
+    if (loginStr != null) _lastLogin = DateTime.tryParse(loginStr);
 
-  /// Загрузка данных администратора
-  Future<void> _loadAdminData() async {
-    _adminName = _prefs.getString(_adminNameKey) ?? 'Администратор';
-
-    // Загрузка роли
-    final roleCode = _prefs.getString(_adminRoleKey);
-    if (roleCode != null) {
-      _role = AdminRole.fromCode(roleCode);
+    final limiterJson = _prefs.getString(_limiterKey);
+    if (limiterJson != null) {
+      _limiter = SimpleRateLimiter.fromJson(jsonDecode(limiterJson));
     }
 
-    // Загрузка последнего входа
-    final lastLoginStr = _prefs.getString(_lastLoginKey);
-    if (lastLoginStr != null) {
-      _lastLoginTime = DateTime.tryParse(lastLoginStr);
+    final secondJson = await _secure.read(key: _secondKey);
+    if (secondJson != null) {
+      _secondFactor = SecondFactor.fromJson(jsonDecode(secondJson));
     }
-
-    // Загрузка 2FA
-    await _load2FA();
-
-    // Загрузка rate limiter
-    await _loadRateLimiter();
 
     notifyListeners();
   }
 
-  /// Загрузка настроек 2FA
-  Future<void> _load2FA() async {
-    final twoFactorJson = await _secureStorage.read(key: _twoFactorKey);
-    if (twoFactorJson != null) {
-      try {
-        final data = jsonDecode(twoFactorJson);
-        _twoFactorAuth = TwoFactorAuth.fromJson(data);
-      } catch (e) {
-        debugPrint('Error loading 2FA: $e');
-      }
+  /// Простой вход
+  Future<String> login(String pass, {String? secondCode}) async {
+    // Проверка блокировки
+    if (_limiter.isLocked) {
+      return 'Заблокировано. Подождите ${_limiter.lockTimeRemaining}';
     }
-  }
 
-  /// Загрузка rate limiter
-  Future<void> _loadRateLimiter() async {
-    final rateLimiterJson = _prefs.getString(_rateLimiterKey);
-    if (rateLimiterJson != null) {
-      try {
-        final data = jsonDecode(rateLimiterJson);
-        _rateLimiter = RateLimiter.fromJson(data);
-      } catch (e) {
-        debugPrint('Error loading rate limiter: $e');
-      }
+    // Проверка пароля
+    final saved = await _secure.read(key: _passKey) ?? _defaultPass;
+    if (pass != saved) {
+      _limiter.recordFail();
+      await _saveLimiter();
+      notifyListeners();
+      return 'Неверный пароль. Осталось попыток: ${_limiter.remainingAttempts}';
     }
-  }
 
-  /// Сохранение 2FA
-  Future<void> _save2FA() async {
-    if (_twoFactorAuth != null) {
-      final json = jsonEncode(_twoFactorAuth!.toJson());
-      await _secureStorage.write(key: _twoFactorKey, value: json);
-    } else {
-      await _secureStorage.delete(key: _twoFactorKey);
-    }
-  }
-
-  /// Сохранение rate limiter
-  Future<void> _saveRateLimiter() async {
-    final json = jsonEncode(_rateLimiter.toJson());
-    await _prefs.setString(_rateLimiterKey, json);
-  }
-
-  // ============== Аутентификация ==============
-
-  /// Проверка, установлен ли пароль
-  Future<bool> hasAdminPassword() async {
-    final password = await _secureStorage.read(key: _adminPasswordKey);
-    return password != null && password.isNotEmpty;
-  }
-
-  /// Вход в админку
-  Future<LoginResult> login(String password, {String? twoFactorCode}) async {
-    try {
-      // Проверка блокировки
-      if (_rateLimiter.isLockedOut) {
-        return LoginResult.lockedOut;
-      }
-
-      // Проверка пароля
-      final hasPassword = await hasAdminPassword();
-      String? savedPassword;
-
-      if (hasPassword) {
-        savedPassword = await _secureStorage.read(key: _adminPasswordKey);
-      } else {
-        savedPassword = _defaultPassword;
-        await setAdminPassword(_defaultPassword);
-      }
-
-      if (password != savedPassword) {
-        // Неверный пароль - увеличиваем счетчик попыток
-        _rateLimiter = _rateLimiter.recordFailedAttempt();
-        await _saveRateLimiter();
+    // Проверка second factor
+    if (_secondFactor?.enabled == true) {
+      if (secondCode == null) return 'NEED_SECOND'; // Специальный код
+      if (!_secondFactor!.verify(secondCode)) {
+        _limiter.recordFail();
+        await _saveLimiter();
         notifyListeners();
-        return LoginResult.wrongPassword;
+        return 'Неверный PIN код';
       }
-
-      // Проверка 2FA
-      if (_twoFactorAuth != null && _twoFactorAuth!.isEnabled) {
-        if (twoFactorCode == null || twoFactorCode.isEmpty) {
-          return LoginResult.need2FA;
-        }
-
-        if (!_twoFactorAuth!.verifyCode(twoFactorCode)) {
-          _rateLimiter = _rateLimiter.recordFailedAttempt();
-          await _saveRateLimiter();
-          notifyListeners();
-          return LoginResult.wrong2FA;
-        }
-
-        // Если использован резервный код, обновляем 2FA
-        if (_twoFactorAuth!.backupCodes.contains(twoFactorCode)) {
-          _twoFactorAuth = _twoFactorAuth!.useBackupCode(twoFactorCode);
-          await _save2FA();
-        }
-      }
-
-      // Успешный вход
-      _isAuthenticated = true;
-      _lastLoginTime = DateTime.now();
-      _rateLimiter = _rateLimiter.reset();
-
-      await _prefs.setString(_lastLoginKey, _lastLoginTime!.toIso8601String());
-      await _saveRateLimiter();
-
-      debugPrint('✅ Admin logged in: $_adminName ($_role)');
-      notifyListeners();
-      return LoginResult.success;
-    } catch (e) {
-      debugPrint('❌ Admin login error: $e');
-      return LoginResult.error;
     }
+
+    // Успех
+    _isAuth = true;
+    _lastLogin = DateTime.now();
+    _limiter.reset();
+
+    await _prefs.setString(_loginKey, _lastLogin!.toIso8601String());
+    await _saveLimiter();
+
+    notifyListeners();
+    return 'OK';
   }
 
-  /// Выход из админки
   Future<void> logout() async {
-    _isAuthenticated = false;
-    debugPrint('🚪 Admin logged out');
+    _isAuth = false;
     notifyListeners();
   }
 
-  // ============== Управление паролем ==============
-
-  /// Установка пароля
-  Future<void> setAdminPassword(String password) async {
-    await _secureStorage.write(key: _adminPasswordKey, value: password);
-    debugPrint('✅ Admin password set');
-  }
-
-  /// Изменение пароля
-  Future<bool> changePassword(String oldPassword, String newPassword) async {
-    try {
-      final savedPassword = await _secureStorage.read(key: _adminPasswordKey);
-
-      if (savedPassword == oldPassword) {
-        await setAdminPassword(newPassword);
-        debugPrint('✅ Admin password changed');
-        return true;
-      } else {
-        debugPrint('❌ Old password incorrect');
-        return false;
-      }
-    } catch (e) {
-      debugPrint('❌ Change password error: $e');
-      return false;
-    }
-  }
-
-  /// Сброс пароля
-  Future<void> resetAdminPassword() async {
-    await _secureStorage.delete(key: _adminPasswordKey);
-    await setAdminPassword(_defaultPassword);
-    debugPrint('🔄 Admin password reset to default');
-  }
-
-  // ============== Управление ролями ==============
-
-  /// Установка роли
-  Future<void> setRole(AdminRole newRole) async {
-    _role = newRole;
-    await _prefs.setString(_adminRoleKey, newRole.code);
-    debugPrint('✅ Admin role set to: ${newRole.displayName}');
+  Future<void> setName(String n) async {
+    _name = n;
+    await _prefs.setString(_nameKey, n);
     notifyListeners();
   }
 
-  /// Получение роли
-  AdminRole getRole() => _role;
+  Future<void> setRole(String r) async {
+    _role = r;
+    await _prefs.setString(_roleKey, r);
+    notifyListeners();
+  }
 
-  // ============== Управление 2FA ==============
+  Future<bool> changePass(String oldPass, String newPass) async {
+    final saved = await _secure.read(key: _passKey) ?? _defaultPass;
+    if (oldPass != saved) return false;
 
-  /// Включение 2FA
-  Future<TwoFactorAuth> enable2FA() async {
-    if (_twoFactorAuth == null) {
-      _twoFactorAuth = TwoFactorAuth(
-        secretKey: TwoFactorAuth.generateSecretKey(),
-        isEnabled: false,
+    await _secure.write(key: _passKey, value: newPass);
+    return true;
+  }
+
+  Future<void> resetPass() async {
+    await _secure.delete(key: _passKey);
+    await _secure.write(key: _passKey, value: _defaultPass);
+  }
+
+  // Second Factor (простой PIN)
+  Future<void> enableSecondFactor(String pin) async {
+    _secondFactor = SecondFactor(
+      pinCode: pin,
+      enabled: true,
+      backupCodes: SecondFactor.generateBackups(),
+    );
+    await _saveSecond();
+    notifyListeners();
+  }
+
+  Future<void> disableSecondFactor() async {
+    if (_secondFactor != null) {
+      _secondFactor = SecondFactor(
+        pinCode: _secondFactor!.pinCode,
+        enabled: false,
+        backupCodes: _secondFactor!.backupCodes,
       );
-    }
-
-    _twoFactorAuth = _twoFactorAuth!.enable();
-    await _save2FA();
-    debugPrint('✅ 2FA enabled');
-    notifyListeners();
-    return _twoFactorAuth!;
-  }
-
-  /// Отключение 2FA
-  Future<void> disable2FA() async {
-    if (_twoFactorAuth != null) {
-      _twoFactorAuth = _twoFactorAuth!.disable();
-      await _save2FA();
-      debugPrint('🚫 2FA disabled');
+      await _saveSecond();
       notifyListeners();
     }
   }
 
-  /// Получение секретного ключа для настройки 2FA
-  Future<String> get2FASecretKey() async {
-    if (_twoFactorAuth == null) {
-      _twoFactorAuth = TwoFactorAuth(
-        secretKey: TwoFactorAuth.generateSecretKey(),
-        isEnabled: false,
-      );
-      await _save2FA();
-    }
-    return _twoFactorAuth!.secretKey;
+  List<String> getBackupCodes() => _secondFactor?.backupCodes ?? [];
+
+  Future<void> _saveLimiter() async {
+    await _prefs.setString(_limiterKey, jsonEncode(_limiter.toJson()));
   }
 
-  /// Получение резервных кодов
-  List<String> get2FABackupCodes() {
-    return _twoFactorAuth?.backupCodes ?? [];
-  }
-
-  /// Регенерация резервных кодов
-  Future<List<String>> regenerate2FABackupCodes() async {
-    if (_twoFactorAuth != null) {
-      _twoFactorAuth = _twoFactorAuth!.regenerateBackupCodes();
-      await _save2FA();
-      notifyListeners();
-      return _twoFactorAuth!.backupCodes;
-    }
-    return [];
-  }
-
-  // ============== Управление именем ==============
-
-  /// Установка имени
-  Future<void> setAdminName(String name) async {
-    _adminName = name;
-    await _prefs.setString(_adminNameKey, name);
-    notifyListeners();
-  }
-
-  // ============== Проверка прав ==============
-
-  /// Проверка права на действие
-  bool hasPermission(String action) {
-    return permissions.hasPermission(action);
-  }
-
-  /// Проверка сессии
-  bool isSessionValid({int maxHours = 24}) {
-    if (!_isAuthenticated || _lastLoginTime == null) {
-      return false;
-    }
-
-    final now = DateTime.now();
-    final difference = now.difference(_lastLoginTime!);
-
-    return difference.inHours < maxHours;
-  }
-
-  /// Обновление времени последней активности
-  Future<void> updateLastActivity() async {
-    if (_isAuthenticated) {
-      _lastLoginTime = DateTime.now();
-      await _prefs.setString(_lastLoginKey, _lastLoginTime!.toIso8601String());
+  Future<void> _saveSecond() async {
+    if (_secondFactor != null) {
+      await _secure.write(key: _secondKey, jsonEncode(_secondFactor!.toJson()));
     }
   }
-
-  // ============== Сброс rate limiter (для тестирования) ==============
-
-  /// Сброс блокировки (только для admin)
-  Future<void> resetRateLimiter() async {
-    if (isAdmin) {
-      _rateLimiter = RateLimiter();
-      await _saveRateLimiter();
-      notifyListeners();
-      debugPrint('🔄 Rate limiter reset');
-    }
-  }
-}
-
-/// Результаты попытки входа
-enum LoginResult {
-  success, // Успешный вход
-  wrongPassword, // Неверный пароль
-  need2FA, // Требуется 2FA код
-  wrong2FA, // Неверный 2FA код
-  lockedOut, // Заблокирован из-за превышения попыток
-  error, // Ошибка
 }

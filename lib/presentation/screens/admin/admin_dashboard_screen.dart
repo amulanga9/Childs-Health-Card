@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../providers/admin_provider.dart';
 import '../../providers/admin_auth_provider.dart';
 import '../../providers/admin_logs_provider.dart';
+import '../../../data/models/admin_security.dart';
 import 'widgets/admin_drawer.dart';
 import 'widgets/admin_stat_card.dart';
 
@@ -109,14 +110,49 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'Добро пожаловать, ${adminAuth.adminName}!',
-                    style: Theme.of(context).textTheme.titleMedium,
+                  Row(
+                    children: [
+                      Text(
+                        'Добро пожаловать, ${adminAuth.name}!',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      const SizedBox(width: 8),
+                      // Role badge
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: _getRoleColor(adminAuth.role),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          AdminRole.getDisplayName(adminAuth.role),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                  if (adminAuth.lastLoginTime != null)
+                  const SizedBox(height: 4),
+                  if (adminAuth.lastLogin != null)
                     Text(
-                      'Последний вход: ${_formatDateTime(adminAuth.lastLoginTime!)}',
+                      'Последний вход: ${_formatDateTime(adminAuth.lastLogin!)}',
                       style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  if (adminAuth.hasSecondFactor)
+                    Row(
+                      children: [
+                        const Icon(Icons.shield, size: 14, color: Colors.green),
+                        const SizedBox(width: 4),
+                        Text(
+                          'PIN-код включен',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Colors.green,
+                          ),
+                        ),
+                      ],
                     ),
                 ],
               ),
@@ -125,6 +161,19 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         ),
       ),
     );
+  }
+
+  Color _getRoleColor(String role) {
+    switch (role) {
+      case AdminRole.admin:
+        return Colors.red;
+      case AdminRole.moderator:
+        return Colors.blue;
+      case AdminRole.viewer:
+        return Colors.grey;
+      default:
+        return Colors.grey;
+    }
   }
 
   Widget _buildMainStats(AdminProvider adminProvider) {
@@ -179,7 +228,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   Widget _buildRecentActivity(AdminLogsProvider adminLogs) {
-    final recentLogs = adminLogs.getRecentLogs(days: 1).take(5).toList();
+    final recentLogs = adminLogs.recent(days: 1).take(5).toList();
 
     if (recentLogs.isEmpty) {
       return const Card(

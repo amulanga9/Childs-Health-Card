@@ -15,12 +15,15 @@ class AdminLoginScreen extends StatefulWidget {
 class _AdminLoginScreenState extends State<AdminLoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _passwordController = TextEditingController();
+  final _pinController = TextEditingController();
   bool _isObscure = true;
   bool _isLoading = false;
+  bool _needsSecondFactor = false;
 
   @override
   void dispose() {
     _passwordController.dispose();
+    _pinController.dispose();
     super.dispose();
   }
 
@@ -34,29 +37,45 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
     final adminAuth = context.read<AdminAuthProvider>();
     final adminLogs = context.read<AdminLogsProvider>();
 
-    final success = await adminAuth.login(_passwordController.text);
+    // Вход с опциональным PIN-кодом
+    final result = await adminAuth.login(
+      _passwordController.text,
+      secondCode: _needsSecondFactor ? _pinController.text : null,
+    );
 
-    if (success && mounted) {
-      // Логируем вход
-      await adminLogs.addLog(
+    if (result == 'OK' && mounted) {
+      // Логируем успешный вход
+      await adminLogs.add(
         action: 'login',
-        entityType: 'system',
-        adminName: adminAuth.adminName,
+        entityType: 'security',
+        adminName: adminAuth.name,
       );
 
       // Переходим на панель администратора
       context.go('/admin');
+    } else if (result == 'NEED_SECOND' && mounted) {
+      // Нужен второй фактор
+      setState(() {
+        _isLoading = false;
+        _needsSecondFactor = true;
+      });
     } else if (mounted) {
+      // Логируем неудачную попытку
+      await adminLogs.add(
+        action: 'failed_login',
+        entityType: 'security',
+        adminName: 'Unknown',
+        entityName: result,
+      );
+
       // Показываем ошибку
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Неверный пароль'),
+        SnackBar(
+          content: Text(result),
           backgroundColor: Colors.red,
         ),
       );
-    }
 
-    if (mounted) {
       setState(() => _isLoading = false);
     }
   }
@@ -64,6 +83,7 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final adminAuth = context.watch<AdminAuthProvider>();
 
     return Scaffold(
       body: Container(
@@ -113,7 +133,7 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
 
                           // Заголовок
                           Text(
-                            'Вход в админку',
+                            _needsSecondFactor ? 'Второй фактор' : 'Вход в админку',
                             style: theme.textTheme.headlineMedium?.copyWith(
                               fontWeight: FontWeight.bold,
                             ),
@@ -122,7 +142,9 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                           const SizedBox(height: 8),
 
                           Text(
-                            'Введите пароль администратора',
+                            _needsSecondFactor
+                                ? 'Введите PIN-код'
+                                : 'Введите пароль администратора',
                             style: theme.textTheme.bodyMedium?.copyWith(
                               color: Colors.grey,
                             ),
@@ -131,36 +153,108 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
 
                           const SizedBox(height: 32),
 
-                          // Поле пароля
-                          TextFormField(
-                            controller: _passwordController,
-                            obscureText: _isObscure,
-                            keyboardType: TextInputType.number,
-                            maxLength: 20,
-                            decoration: InputDecoration(
-                              labelText: 'Пароль',
-                              prefixIcon: const Icon(Icons.lock),
-                              suffixIcon: IconButton(
-                                icon: Icon(
-                                  _isObscure
-                                      ? Icons.visibility
-                                      : Icons.visibility_off,
-                                ),
-                                onPressed: () {
-                                  setState(() => _isObscure = !_isObscure);
-                                },
+                          // Rate limiting status
+                          if (adminAuth.isLocked)
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              margin: const EdgeInsets.only(bottom: 16),
+                              decoration: BoxDecoration(
+                                color: Colors.red.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.red),
                               ),
-                              border: const OutlineInputBorder(),
-                              counterText: '',
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.lock, color: Colors.red),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Text(
+                                      'Заблокировано: ${adminAuth.lockTime}',
+                                      style: theme.textTheme.bodyMedium?.copyWith(
+                                        color: Colors.red[700],
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            )
+                          else if (!_needsSecondFactor && adminAuth.attemptsLeft < 5)
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              margin: const EdgeInsets.only(bottom: 16),
+                              decoration: BoxDecoration(
+                                color: Colors.orange.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.warning, color: Colors.orange),
+                                  const SizedBox(width: 12),
+                                  Text(
+                                    'Осталось попыток: ${adminAuth.attemptsLeft}',
+                                    style: theme.textTheme.bodyMedium?.copyWith(
+                                      color: Colors.orange[700],
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
-                            validator: (value) {
-                              if (value == null || value.isEmpty) {
-                                return 'Введите пароль';
-                              }
-                              return null;
-                            },
-                            onFieldSubmitted: (_) => _handleLogin(),
-                          ),
+
+                          // Поле пароля или PIN
+                          if (!_needsSecondFactor)
+                            TextFormField(
+                              controller: _passwordController,
+                              obscureText: _isObscure,
+                              keyboardType: TextInputType.number,
+                              maxLength: 20,
+                              enabled: !adminAuth.isLocked,
+                              decoration: InputDecoration(
+                                labelText: 'Пароль',
+                                prefixIcon: const Icon(Icons.lock),
+                                suffixIcon: IconButton(
+                                  icon: Icon(
+                                    _isObscure
+                                        ? Icons.visibility
+                                        : Icons.visibility_off,
+                                  ),
+                                  onPressed: () {
+                                    setState(() => _isObscure = !_isObscure);
+                                  },
+                                ),
+                                border: const OutlineInputBorder(),
+                                counterText: '',
+                              ),
+                              validator: (value) {
+                                if (value == null || value.isEmpty) {
+                                  return 'Введите пароль';
+                                }
+                                return null;
+                              },
+                              onFieldSubmitted: (_) => _handleLogin(),
+                            )
+                          else
+                            TextFormField(
+                              controller: _pinController,
+                              obscureText: true,
+                              keyboardType: TextInputType.number,
+                              maxLength: 6,
+                              autofocus: true,
+                              decoration: const InputDecoration(
+                                labelText: 'PIN-код',
+                                prefixIcon: Icon(Icons.pin),
+                                border: OutlineInputBorder(),
+                                counterText: '',
+                                helperText: 'Введите 4-значный PIN или резервный код',
+                              ),
+                              validator: (value) {
+                                if (value == null || value.isEmpty) {
+                                  return 'Введите PIN-код';
+                                }
+                                return null;
+                              },
+                              onFieldSubmitted: (_) => _handleLogin(),
+                            ),
 
                           const SizedBox(height: 24),
 
@@ -169,7 +263,7 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                             width: double.infinity,
                             height: 48,
                             child: FilledButton(
-                              onPressed: _isLoading ? null : _handleLogin,
+                              onPressed: (_isLoading || adminAuth.isLocked) ? null : _handleLogin,
                               child: _isLoading
                                   ? const SizedBox(
                                       width: 20,
@@ -179,47 +273,60 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                                         color: Colors.white,
                                       ),
                                     )
-                                  : const Text('Войти'),
+                                  : Text(_needsSecondFactor ? 'Подтвердить' : 'Войти'),
                             ),
                           ),
 
                           const SizedBox(height: 16),
 
                           // Кнопка назад
-                          TextButton.icon(
-                            onPressed: () => context.go('/home'),
-                            icon: const Icon(Icons.arrow_back),
-                            label: const Text('Вернуться в приложение'),
-                          ),
+                          if (_needsSecondFactor)
+                            TextButton.icon(
+                              onPressed: () {
+                                setState(() {
+                                  _needsSecondFactor = false;
+                                  _pinController.clear();
+                                });
+                              },
+                              icon: const Icon(Icons.arrow_back),
+                              label: const Text('Назад к паролю'),
+                            )
+                          else
+                            TextButton.icon(
+                              onPressed: () => context.go('/home'),
+                              icon: const Icon(Icons.arrow_back),
+                              label: const Text('Вернуться в приложение'),
+                            ),
 
                           const SizedBox(height: 24),
 
                           // Информация
-                          Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: Colors.blue.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Row(
-                              children: [
-                                const Icon(
-                                  Icons.info_outline,
-                                  size: 20,
-                                  color: Colors.blue,
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Text(
-                                    'Пароль по умолчанию: 0000\nИзменить пароль можно в настройках',
-                                    style: theme.textTheme.bodySmall?.copyWith(
-                                      color: Colors.blue[700],
+                          if (!_needsSecondFactor)
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.blue.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(
+                                    Icons.info_outline,
+                                    size: 20,
+                                    color: Colors.blue,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Text(
+                                      'Пароль по умолчанию: 0000\nИзменить пароль можно в настройках',
+                                      style: theme.textTheme.bodySmall?.copyWith(
+                                        color: Colors.blue[700],
+                                      ),
                                     ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
-                          ),
                         ],
                       ),
                     ),
