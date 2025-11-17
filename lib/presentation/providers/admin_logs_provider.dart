@@ -44,7 +44,7 @@ class AdminLogsProvider with ChangeNotifier {
     }
   }
 
-  /// Добавить лог
+  /// Добавить лог с валидацией
   Future<void> add({
     required String action,
     required String entityType,
@@ -52,6 +52,12 @@ class AdminLogsProvider with ChangeNotifier {
     int? entityId,
     String? entityName,
   }) async {
+    // Валидация входных данных
+    if (action.isEmpty || entityType.isEmpty || adminName.isEmpty) {
+      debugPrint('Предупреждение: попытка добавить лог с пустыми полями');
+      return;
+    }
+
     final log = ActivityLog(
       id: _nextId++,
       action: action,
@@ -64,6 +70,7 @@ class AdminLogsProvider with ChangeNotifier {
 
     _logs.insert(0, log);
 
+    // Ограничиваем размер логов
     if (_logs.length > _maxLogs) {
       _logs.removeLast();
     }
@@ -104,15 +111,33 @@ class AdminLogsProvider with ChangeNotifier {
     });
   }
 
+  /// Экспорт в CSV с правильным экранированием
   String exportCsv() {
     final buf = StringBuffer();
     buf.writeln('ID,Действие,Тип,Администратор,Время');
 
     for (final log in _logs) {
-      buf.writeln('${log.id},${log.action},${log.entityType},${log.adminName},${log.timestamp}');
+      // Экранируем каждое поле для защиты от CSV injection
+      buf.writeln([
+        log.id.toString(),
+        _escapeCsv(log.action),
+        _escapeCsv(log.entityType),
+        _escapeCsv(log.adminName),
+        log.timestamp.toIso8601String(),
+      ].join(','));
     }
 
     return buf.toString();
+  }
+
+  /// Экранирование значений для CSV (защита от injection)
+  String _escapeCsv(String value) {
+    // Если содержит запятую, кавычки или перевод строки - оборачиваем в кавычки
+    if (value.contains(',') || value.contains('"') || value.contains('\n')) {
+      // Удваиваем кавычки внутри и оборачиваем в кавычки
+      return '"${value.replaceAll('"', '""')}"';
+    }
+    return value;
   }
 
   Future<void> clearAll() async {

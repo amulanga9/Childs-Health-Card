@@ -97,7 +97,9 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
               child: ListTile(
                 leading: const Icon(Icons.key),
                 title: const Text('Резервные коды'),
-                subtitle: const Text('Просмотреть коды восстановления'),
+                subtitle: Text(
+                  'Осталось кодов: ${adminAuth.getBackupCodes().length} из 5'
+                ),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () => _showBackupCodes(context),
               ),
@@ -342,6 +344,13 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
               if (pinController.text.length != 4) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('PIN должен быть 4 цифры')),
+                );
+                return;
+              }
+              // Проверка что PIN состоит только из цифр
+              if (!RegExp(r'^\d{4}$').hasMatch(pinController.text)) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('PIN должен содержать только цифры')),
                 );
                 return;
               }

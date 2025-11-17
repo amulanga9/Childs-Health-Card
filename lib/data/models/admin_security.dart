@@ -1,6 +1,8 @@
 /// Упрощенная модель безопасности админ-панели
 library;
 
+import 'dart:math';
+
 /// Простые роли админа (без сложного enum)
 class AdminRole {
   static const String admin = 'admin';
@@ -18,6 +20,11 @@ class AdminRole {
       default:
         return role;
     }
+  }
+
+  /// Валидация роли
+  static bool isValid(String role) {
+    return role == admin || role == moderator || role == viewer;
   }
 }
 
@@ -66,9 +73,13 @@ class SimpleRateLimiter {
   }
 
   String? get lockTimeRemaining {
-    if (!isLocked) return null;
+    if (lockUntil == null) return null;
     final diff = lockUntil!.difference(DateTime.now());
-    return '${diff.inMinutes}:${(diff.inSeconds % 60).toString().padLeft(2, '0')}';
+    // Защита от race condition - если время истекло, возвращаем null
+    if (diff.isNegative) return null;
+    final minutes = diff.inMinutes;
+    final seconds = diff.inSeconds % 60;
+    return '$minutes:${seconds.toString().padLeft(2, '0')}';
   }
 
   Map<String, dynamic> toJson() => {
@@ -88,7 +99,7 @@ class SimpleRateLimiter {
 class SecondFactor {
   final String pinCode; // Просто 4 цифры
   final bool enabled;
-  final List<String> backupCodes; // 5 простых кодов
+  final List<String> backupCodes; // 5 уникальных случайных кодов
 
   SecondFactor({
     required this.pinCode,
@@ -96,17 +107,56 @@ class SecondFactor {
     this.backupCodes = const [],
   });
 
+  /// Проверка кода (PIN или backup)
+  /// Возвращает: (успех, использованный backup code или null)
+  (bool, String?) verifyWithUsage(String code) {
+    if (!enabled) return (true, null);
+
+    if (code == pinCode) {
+      return (true, null); // PIN не удаляется
+    }
+
+    if (backupCodes.contains(code)) {
+      return (true, code); // Backup код нужно удалить
+    }
+
+    return (false, null);
+  }
+
+  /// Простая проверка без отслеживания использования (для обратной совместимости)
   bool verify(String code) {
-    if (!enabled) return true;
-    return code == pinCode || backupCodes.contains(code);
+    return verifyWithUsage(code).$1;
   }
 
+  /// Удалить использованный backup код
+  SecondFactor removeBackupCode(String code) {
+    return SecondFactor(
+      pinCode: pinCode,
+      enabled: enabled,
+      backupCodes: backupCodes.where((c) => c != code).toList(),
+    );
+  }
+
+  /// Генерация криптографически безопасного PIN
   static String generatePin() {
-    return (1000 + DateTime.now().millisecondsSinceEpoch % 9000).toString();
+    final random = Random.secure();
+    // Генерируем случайное 4-значное число от 1000 до 9999
+    final pin = 1000 + random.nextInt(9000);
+    return pin.toString();
   }
 
+  /// Генерация уникальных криптографически безопасных backup кодов
   static List<String> generateBackups() {
-    return List.generate(5, (i) => (10000 + i * 1111).toString());
+    final random = Random.secure();
+    final codes = <String>{};
+
+    // Генерируем 5 уникальных 5-значных кодов
+    while (codes.length < 5) {
+      final code = 10000 + random.nextInt(90000);
+      codes.add(code.toString());
+    }
+
+    return codes.toList();
   }
 
   Map<String, dynamic> toJson() => {

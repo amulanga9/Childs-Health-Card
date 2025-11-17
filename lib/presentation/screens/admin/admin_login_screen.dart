@@ -43,13 +43,25 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
       secondCode: _needsSecondFactor ? _pinController.text : null,
     );
 
-    if (result == 'OK' && mounted) {
+    if ((result == 'OK' || result == 'OK_BACKUP_USED') && mounted) {
       // Логируем успешный вход
       await adminLogs.add(
-        action: 'login',
+        action: result == 'OK_BACKUP_USED' ? 'backup_code_used' : 'login',
         entityType: 'security',
         adminName: adminAuth.name,
+        entityName: result == 'OK_BACKUP_USED' ? 'Использован резервный код' : null,
       );
+
+      // Показываем предупреждение при использовании backup кода
+      if (result == 'OK_BACKUP_USED' && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('⚠️ Использован резервный код. Осталось кодов: см. настройки'),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 5),
+          ),
+        );
+      }
 
       // Переходим на панель администратора
       context.go('/admin');

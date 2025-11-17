@@ -53,14 +53,26 @@ class AdminAuthProvider with ChangeNotifier {
     final loginStr = _prefs.getString(_loginKey);
     if (loginStr != null) _lastLogin = DateTime.tryParse(loginStr);
 
+    // Загрузка rate limiter с обработкой ошибок
     final limiterJson = _prefs.getString(_limiterKey);
     if (limiterJson != null) {
-      _limiter = SimpleRateLimiter.fromJson(jsonDecode(limiterJson));
+      try {
+        _limiter = SimpleRateLimiter.fromJson(jsonDecode(limiterJson));
+      } catch (e) {
+        debugPrint('Ошибка загрузки rate limiter: $e');
+        _limiter = SimpleRateLimiter(); // Создаем новый при ошибке
+      }
     }
 
+    // Загрузка second factor с обработкой ошибок
     final secondJson = await _secure.read(key: _secondKey);
     if (secondJson != null) {
-      _secondFactor = SecondFactor.fromJson(jsonDecode(secondJson));
+      try {
+        _secondFactor = SecondFactor.fromJson(jsonDecode(secondJson));
+      } catch (e) {
+        debugPrint('Ошибка загрузки second factor: $e');
+        _secondFactor = null; // Сбрасываем при ошибке
+      }
     }
 
     notifyListeners();
@@ -68,6 +80,11 @@ class AdminAuthProvider with ChangeNotifier {
 
   /// Простой вход
   Future<String> login(String pass, {String? secondCode}) async {
+    // Валидация входных данных
+    if (pass.isEmpty) {
+      return 'Пароль не может быть пустым';
+    }
+
     // Проверка блокировки
     if (_limiter.isLocked) {
       return 'Заблокировано. Подождите ${_limiter.lockTimeRemaining}';
@@ -83,13 +100,24 @@ class AdminAuthProvider with ChangeNotifier {
     }
 
     // Проверка second factor
+    bool usedBackup = false;
     if (_secondFactor?.enabled == true) {
       if (secondCode == null) return 'NEED_SECOND'; // Специальный код
-      if (!_secondFactor!.verify(secondCode)) {
+
+      final (success, usedBackupCode) = _secondFactor!.verifyWithUsage(secondCode);
+
+      if (!success) {
         _limiter.recordFail();
         await _saveLimiter();
         notifyListeners();
         return 'Неверный PIN код';
+      }
+
+      // Если использован backup код - удаляем его
+      if (usedBackupCode != null) {
+        _secondFactor = _secondFactor!.removeBackupCode(usedBackupCode);
+        await _saveSecond();
+        usedBackup = true;
       }
     }
 
@@ -102,7 +130,7 @@ class AdminAuthProvider with ChangeNotifier {
     await _saveLimiter();
 
     notifyListeners();
-    return 'OK';
+    return usedBackup ? 'OK_BACKUP_USED' : 'OK';
   }
 
   Future<void> logout() async {
@@ -111,18 +139,35 @@ class AdminAuthProvider with ChangeNotifier {
   }
 
   Future<void> setName(String n) async {
+    // Валидация
+    if (n.isEmpty) {
+      debugPrint('Предупреждение: попытка установить пустое имя');
+      return;
+    }
+
     _name = n;
     await _prefs.setString(_nameKey, n);
     notifyListeners();
   }
 
   Future<void> setRole(String r) async {
+    // Валидация роли
+    if (!AdminRole.isValid(r)) {
+      debugPrint('Ошибка: неверная роль $r');
+      return;
+    }
+
     _role = r;
     await _prefs.setString(_roleKey, r);
     notifyListeners();
   }
 
   Future<bool> changePass(String oldPass, String newPass) async {
+    // Валидация
+    if (oldPass.isEmpty || newPass.isEmpty) {
+      return false;
+    }
+
     final saved = await _secure.read(key: _passKey) ?? _defaultPass;
     if (oldPass != saved) return false;
 
@@ -131,12 +176,17 @@ class AdminAuthProvider with ChangeNotifier {
   }
 
   Future<void> resetPass() async {
-    await _secure.delete(key: _passKey);
     await _secure.write(key: _passKey, value: _defaultPass);
   }
 
   // Second Factor (простой PIN)
   Future<void> enableSecondFactor(String pin) async {
+    // Валидация PIN: должен быть ровно 4 цифры
+    if (pin.length != 4 || !RegExp(r'^\d{4}$').hasMatch(pin)) {
+      debugPrint('Ошибка: PIN должен быть 4 цифры');
+      return;
+    }
+
     _secondFactor = SecondFactor(
       pinCode: pin,
       enabled: true,
@@ -161,12 +211,24 @@ class AdminAuthProvider with ChangeNotifier {
   List<String> getBackupCodes() => _secondFactor?.backupCodes ?? [];
 
   Future<void> _saveLimiter() async {
-    await _prefs.setString(_limiterKey, jsonEncode(_limiter.toJson()));
+    try {
+      await _prefs.setString(_limiterKey, jsonEncode(_limiter.toJson()));
+    } catch (e) {
+      debugPrint('Ошибка сохранения rate limiter: $e');
+    }
   }
 
   Future<void> _saveSecond() async {
     if (_secondFactor != null) {
-      await _secure.write(key: _secondKey, jsonEncode(_secondFactor!.toJson()));
+      try {
+        // ИСПРАВЛЕН КРИТИЧЕСКИЙ БАГ: добавлен параметр value:
+        await _secure.write(
+          key: _secondKey,
+          value: jsonEncode(_secondFactor!.toJson()),
+        );
+      } catch (e) {
+        debugPrint('Ошибка сохранения second factor: $e');
+      }
     }
   }
 }
