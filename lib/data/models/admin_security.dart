@@ -1,13 +1,17 @@
-/// Упрощенная модель безопасности админ-панели
+/// Модели безопасности админ-панели
 library;
 
 import 'dart:math';
 
-/// Простые роли админа (без сложного enum)
+/// Роли администратора
 class AdminRole {
+  // Константы ролей
   static const String admin = 'admin';
   static const String moderator = 'moderator';
   static const String viewer = 'viewer';
+
+  // Приватный конструктор - класс только для констант
+  AdminRole._();
 
   static String getDisplayName(String role) {
     switch (role) {
@@ -22,13 +26,12 @@ class AdminRole {
     }
   }
 
-  /// Валидация роли
   static bool isValid(String role) {
     return role == admin || role == moderator || role == viewer;
   }
 }
 
-/// Простая проверка прав (без сложного класса)
+/// Права доступа по ролям
 class Permissions {
   final String role;
 
@@ -41,29 +44,45 @@ class Permissions {
   bool get isAdmin => role == AdminRole.admin;
 }
 
-/// Простой rate limiter (вместо сложного с окнами времени)
+/// Ограничитель попыток входа (rate limiter)
 class SimpleRateLimiter {
+  // Константы
+  static const int maxAttempts = 5;
+  static const int lockDurationMinutes = 15;
+
+  // Состояние
   int failedAttempts = 0;
   DateTime? lockUntil;
 
-  static const maxAttempts = 5;
-  static const lockMinutes = 15;
-
   bool get isLocked {
     if (lockUntil == null) return false;
+
     if (DateTime.now().isAfter(lockUntil!)) {
-      reset(); // Авто-сброс
+      reset();
       return false;
     }
+
     return true;
   }
 
   int get remainingAttempts => isLocked ? 0 : (maxAttempts - failedAttempts);
 
+  String? get lockTimeRemaining {
+    if (lockUntil == null) return null;
+
+    final diff = lockUntil!.difference(DateTime.now());
+    if (diff.isNegative) return null;
+
+    final minutes = diff.inMinutes;
+    final seconds = diff.inSeconds % 60;
+    return '$minutes:${seconds.toString().padLeft(2, '0')}';
+  }
+
   void recordFail() {
     failedAttempts++;
+
     if (failedAttempts >= maxAttempts) {
-      lockUntil = DateTime.now().add(Duration(minutes: lockMinutes));
+      lockUntil = DateTime.now().add(Duration(minutes: lockDurationMinutes));
     }
   }
 
@@ -72,16 +91,7 @@ class SimpleRateLimiter {
     lockUntil = null;
   }
 
-  String? get lockTimeRemaining {
-    if (lockUntil == null) return null;
-    final diff = lockUntil!.difference(DateTime.now());
-    // Защита от race condition - если время истекло, возвращаем null
-    if (diff.isNegative) return null;
-    final minutes = diff.inMinutes;
-    final seconds = diff.inSeconds % 60;
-    return '$minutes:${seconds.toString().padLeft(2, '0')}';
-  }
-
+  // Сериализация
   Map<String, dynamic> toJson() => {
         'attempts': failedAttempts,
         'lockUntil': lockUntil?.toIso8601String(),
@@ -89,17 +99,25 @@ class SimpleRateLimiter {
 
   factory SimpleRateLimiter.fromJson(Map<String, dynamic>? json) {
     if (json == null) return SimpleRateLimiter();
+
     return SimpleRateLimiter()
       ..failedAttempts = json['attempts'] ?? 0
-      ..lockUntil = json['lockUntil'] != null ? DateTime.parse(json['lockUntil']) : null;
+      ..lockUntil =
+          json['lockUntil'] != null ? DateTime.parse(json['lockUntil']) : null;
   }
 }
 
-/// Простой second factor (вместо сложного TOTP)
+/// Второй фактор аутентификации (PIN + резервные коды)
 class SecondFactor {
-  final String pinCode; // Просто 4 цифры
+  // Константы
+  static const int pinLength = 4;
+  static const int backupCodesCount = 5;
+  static const int backupCodeLength = 5;
+
+  // Данные
+  final String pinCode;
   final bool enabled;
-  final List<String> backupCodes; // 5 уникальных случайных кодов
+  final List<String> backupCodes;
 
   SecondFactor({
     required this.pinCode,
@@ -107,28 +125,21 @@ class SecondFactor {
     this.backupCodes = const [],
   });
 
-  /// Проверка кода (PIN или backup)
+  /// Результат проверки кода
   /// Возвращает: (успех, использованный backup code или null)
-  (bool, String?) verifyWithUsage(String code) {
+  (bool, String?) verifyCode(String code) {
     if (!enabled) return (true, null);
 
-    if (code == pinCode) {
-      return (true, null); // PIN не удаляется
-    }
+    // Проверка PIN
+    if (code == pinCode) return (true, null);
 
-    if (backupCodes.contains(code)) {
-      return (true, code); // Backup код нужно удалить
-    }
+    // Проверка backup кодов
+    if (backupCodes.contains(code)) return (true, code);
 
     return (false, null);
   }
 
-  /// Простая проверка без отслеживания использования (для обратной совместимости)
-  bool verify(String code) {
-    return verifyWithUsage(code).$1;
-  }
-
-  /// Удалить использованный backup код
+  /// Создать копию с удаленным backup кодом
   SecondFactor removeBackupCode(String code) {
     return SecondFactor(
       pinCode: pinCode,
@@ -137,28 +148,26 @@ class SecondFactor {
     );
   }
 
-  /// Генерация криптографически безопасного PIN
+  // Генерация безопасных кодов
   static String generatePin() {
     final random = Random.secure();
-    // Генерируем случайное 4-значное число от 1000 до 9999
-    final pin = 1000 + random.nextInt(9000);
+    final pin = 1000 + random.nextInt(9000); // 1000-9999
     return pin.toString();
   }
 
-  /// Генерация уникальных криптографически безопасных backup кодов
-  static List<String> generateBackups() {
+  static List<String> generateBackupCodes() {
     final random = Random.secure();
     final codes = <String>{};
 
-    // Генерируем 5 уникальных 5-значных кодов
-    while (codes.length < 5) {
-      final code = 10000 + random.nextInt(90000);
+    while (codes.length < backupCodesCount) {
+      final code = 10000 + random.nextInt(90000); // 10000-99999
       codes.add(code.toString());
     }
 
     return codes.toList();
   }
 
+  // Сериализация
   Map<String, dynamic> toJson() => {
         'pin': pinCode,
         'enabled': enabled,
@@ -169,6 +178,7 @@ class SecondFactor {
     if (json == null) {
       return SecondFactor(pinCode: '', enabled: false);
     }
+
     return SecondFactor(
       pinCode: json['pin'] ?? '',
       enabled: json['enabled'] ?? false,
@@ -176,3 +186,4 @@ class SecondFactor {
     );
   }
 }
+

@@ -4,26 +4,35 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../data/models/admin_security.dart';
 
-/// Простой провайдер авторизации админа
+/// Провайдер авторизации админ-панели
 class AdminAuthProvider with ChangeNotifier {
+  // Зависимости
   final FlutterSecureStorage _secure;
   final SharedPreferences _prefs;
 
-  bool _isAuth = false;
-  String _name = 'Админ';
-  String _role = AdminRole.admin;
-  DateTime? _lastLogin;
-
-  SimpleRateLimiter _limiter = SimpleRateLimiter();
-  SecondFactor? _secondFactor;
-
+  // Ключи хранилища
   static const _passKey = 'admin_pass';
   static const _nameKey = 'admin_name';
   static const _roleKey = 'admin_role';
   static const _loginKey = 'last_login';
   static const _limiterKey = 'rate_limit';
   static const _secondKey = 'second_factor';
+
+  // Константы
   static const _defaultPass = '0000';
+
+  // Публичные константы результатов login()
+  static const resultOk = 'OK';
+  static const resultBackupUsed = 'OK_BACKUP_USED';
+  static const resultNeedSecond = 'NEED_SECOND';
+
+  // Состояние
+  bool _isAuth = false;
+  String _name = 'Админ';
+  String _role = AdminRole.admin;
+  DateTime? _lastLogin;
+  SimpleRateLimiter _limiter = SimpleRateLimiter();
+  SecondFactor? _secondFactor;
 
   AdminAuthProvider({
     required FlutterSecureStorage secureStorage,
@@ -78,59 +87,74 @@ class AdminAuthProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  /// Простой вход
+  /// Вход в админ-панель
   Future<String> login(String pass, {String? secondCode}) async {
-    // Валидация входных данных
-    if (pass.isEmpty) {
-      return 'Пароль не может быть пустым';
-    }
+    // 1. Валидация
+    if (pass.isEmpty) return 'Пароль не может быть пустым';
 
-    // Проверка блокировки
+    // 2. Проверка блокировки
     if (_limiter.isLocked) {
       return 'Заблокировано. Подождите ${_limiter.lockTimeRemaining}';
     }
 
-    // Проверка пароля
+    // 3. Проверка пароля
+    final passwordValid = await _checkPassword(pass);
+    if (!passwordValid) {
+      return _handleFailedAttempt('Неверный пароль');
+    }
+
+    // 4. Проверка второго фактора
+    final secondFactorResult = await _checkSecondFactor(secondCode);
+    if (secondFactorResult != resultOk) return secondFactorResult;
+
+    // 5. Успешный вход
+    return await _handleSuccessfulLogin();
+  }
+
+  Future<bool> _checkPassword(String pass) async {
     final saved = await _secure.read(key: _passKey) ?? _defaultPass;
-    if (pass != saved) {
-      _limiter.recordFail();
-      await _saveLimiter();
-      notifyListeners();
-      return 'Неверный пароль. Осталось попыток: ${_limiter.remainingAttempts}';
+    return pass == saved;
+  }
+
+  Future<String> _checkSecondFactor(String? code) async {
+    if (_secondFactor?.enabled != true) return resultOk;
+
+    if (code == null) return resultNeedSecond;
+
+    final (success, usedBackupCode) = _secondFactor!.verifyCode(code);
+
+    if (!success) {
+      await _handleFailedAttempt('Неверный PIN код');
+      return 'Неверный PIN код';
     }
 
-    // Проверка second factor
-    bool usedBackup = false;
-    if (_secondFactor?.enabled == true) {
-      if (secondCode == null) return 'NEED_SECOND'; // Специальный код
-
-      final (success, usedBackupCode) = _secondFactor!.verifyWithUsage(secondCode);
-
-      if (!success) {
-        _limiter.recordFail();
-        await _saveLimiter();
-        notifyListeners();
-        return 'Неверный PIN код';
-      }
-
-      // Если использован backup код - удаляем его
-      if (usedBackupCode != null) {
-        _secondFactor = _secondFactor!.removeBackupCode(usedBackupCode);
-        await _saveSecond();
-        usedBackup = true;
-      }
+    // Удаляем использованный backup код
+    if (usedBackupCode != null) {
+      _secondFactor = _secondFactor!.removeBackupCode(usedBackupCode);
+      await _saveJson(_secondKey, _secondFactor!.toJson(), secure: true);
+      return resultBackupUsed;
     }
 
-    // Успех
+    return resultOk;
+  }
+
+  String _handleFailedAttempt(String message) {
+    _limiter.recordFail();
+    _saveJson(_limiterKey, _limiter.toJson());
+    notifyListeners();
+    return '$message. Осталось попыток: ${_limiter.remainingAttempts}';
+  }
+
+  Future<String> _handleSuccessfulLogin() async {
     _isAuth = true;
     _lastLogin = DateTime.now();
     _limiter.reset();
 
     await _prefs.setString(_loginKey, _lastLogin!.toIso8601String());
-    await _saveLimiter();
+    await _saveJson(_limiterKey, _limiter.toJson());
 
     notifyListeners();
-    return usedBackup ? 'OK_BACKUP_USED' : 'OK';
+    return resultOk;
   }
 
   Future<void> logout() async {
@@ -179,56 +203,56 @@ class AdminAuthProvider with ChangeNotifier {
     await _secure.write(key: _passKey, value: _defaultPass);
   }
 
-  // Second Factor (простой PIN)
+  // Управление вторым фактором
   Future<void> enableSecondFactor(String pin) async {
-    // Валидация PIN: должен быть ровно 4 цифры
-    if (pin.length != 4 || !RegExp(r'^\d{4}$').hasMatch(pin)) {
-      debugPrint('Ошибка: PIN должен быть 4 цифры');
+    // Валидация: PIN должен быть ровно 4 цифры
+    if (pin.length != SecondFactor.pinLength ||
+        !RegExp(r'^\d{4}$').hasMatch(pin)) {
+      debugPrint('Ошибка: PIN должен быть ${SecondFactor.pinLength} цифры');
       return;
     }
 
     _secondFactor = SecondFactor(
       pinCode: pin,
       enabled: true,
-      backupCodes: SecondFactor.generateBackups(),
+      backupCodes: SecondFactor.generateBackupCodes(),
     );
-    await _saveSecond();
+
+    await _saveJson(_secondKey, _secondFactor!.toJson(), secure: true);
     notifyListeners();
   }
 
   Future<void> disableSecondFactor() async {
-    if (_secondFactor != null) {
-      _secondFactor = SecondFactor(
-        pinCode: _secondFactor!.pinCode,
-        enabled: false,
-        backupCodes: _secondFactor!.backupCodes,
-      );
-      await _saveSecond();
-      notifyListeners();
-    }
+    if (_secondFactor == null) return;
+
+    _secondFactor = SecondFactor(
+      pinCode: _secondFactor!.pinCode,
+      enabled: false,
+      backupCodes: _secondFactor!.backupCodes,
+    );
+
+    await _saveJson(_secondKey, _secondFactor!.toJson(), secure: true);
+    notifyListeners();
   }
 
   List<String> getBackupCodes() => _secondFactor?.backupCodes ?? [];
 
-  Future<void> _saveLimiter() async {
+  /// Универсальное сохранение JSON в хранилище
+  Future<void> _saveJson(
+    String key,
+    Map<String, dynamic> data, {
+    bool secure = false,
+  }) async {
     try {
-      await _prefs.setString(_limiterKey, jsonEncode(_limiter.toJson()));
-    } catch (e) {
-      debugPrint('Ошибка сохранения rate limiter: $e');
-    }
-  }
+      final json = jsonEncode(data);
 
-  Future<void> _saveSecond() async {
-    if (_secondFactor != null) {
-      try {
-        // ИСПРАВЛЕН КРИТИЧЕСКИЙ БАГ: добавлен параметр value:
-        await _secure.write(
-          key: _secondKey,
-          value: jsonEncode(_secondFactor!.toJson()),
-        );
-      } catch (e) {
-        debugPrint('Ошибка сохранения second factor: $e');
+      if (secure) {
+        await _secure.write(key: key, value: json);
+      } else {
+        await _prefs.setString(key, json);
       }
+    } catch (e) {
+      debugPrint('Ошибка сохранения $key: $e');
     }
   }
 }

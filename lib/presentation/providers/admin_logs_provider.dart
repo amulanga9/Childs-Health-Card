@@ -3,14 +3,20 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../data/models/activity_log.dart';
 
-/// Простой провайдер логов (без лишней сложности)
+/// Провайдер логов админ-панели
 class AdminLogsProvider with ChangeNotifier {
+  // Зависимости
   final SharedPreferences _prefs;
+
+  // Константы
+  static const _storageKey = 'admin_logs';
+  static const _maxLogsCount = 500;
+  static const _csvSeparator = ',';
+  static const _csvQuote = '"';
+
+  // Состояние
   final List<ActivityLog> _logs = [];
   int _nextId = 1;
-
-  static const _key = 'admin_logs';
-  static const _maxLogs = 500; // Уменьшил с 1000
 
   AdminLogsProvider({required SharedPreferences prefs}) : _prefs = prefs {
     _load();
@@ -20,31 +26,33 @@ class AdminLogsProvider with ChangeNotifier {
   int get count => _logs.length;
 
   Future<void> _load() async {
-    final json = _prefs.getString(_key);
-    if (json != null) {
-      try {
-        final list = jsonDecode(json) as List;
-        _logs.addAll(list.map((e) => ActivityLog.fromJson(e)));
-        if (_logs.isNotEmpty) {
-          _nextId = _logs.map((e) => e.id).reduce((a, b) => a > b ? a : b) + 1;
-        }
-      } catch (e) {
-        debugPrint('Ошибка загрузки логов: $e');
+    final json = _prefs.getString(_storageKey);
+    if (json == null) return;
+
+    try {
+      final list = jsonDecode(json) as List;
+      _logs.addAll(list.map((e) => ActivityLog.fromJson(e)));
+
+      if (_logs.isNotEmpty) {
+        _nextId = _logs.fold(0, (max, log) => log.id > max ? log.id : max) + 1;
       }
+
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Ошибка загрузки логов: $e');
     }
-    notifyListeners();
   }
 
   Future<void> _save() async {
     try {
       final json = jsonEncode(_logs.map((e) => e.toJson()).toList());
-      await _prefs.setString(_key, json);
+      await _prefs.setString(_storageKey, json);
     } catch (e) {
       debugPrint('Ошибка сохранения логов: $e');
     }
   }
 
-  /// Добавить лог с валидацией
+  /// Добавить лог
   Future<void> add({
     required String action,
     required String entityType,
@@ -52,9 +60,9 @@ class AdminLogsProvider with ChangeNotifier {
     int? entityId,
     String? entityName,
   }) async {
-    // Валидация входных данных
+    // Валидация
     if (action.isEmpty || entityType.isEmpty || adminName.isEmpty) {
-      debugPrint('Предупреждение: попытка добавить лог с пустыми полями');
+      debugPrint('Попытка добавить лог с пустыми полями');
       return;
     }
 
@@ -70,8 +78,8 @@ class AdminLogsProvider with ChangeNotifier {
 
     _logs.insert(0, log);
 
-    // Ограничиваем размер логов
-    if (_logs.length > _maxLogs) {
+    // Ограничение размера
+    if (_logs.length > _maxLogsCount) {
       _logs.removeLast();
     }
 
@@ -111,39 +119,40 @@ class AdminLogsProvider with ChangeNotifier {
     });
   }
 
-  /// Экспорт в CSV с правильным экранированием
+  /// Экспорт в CSV с экранированием
   String exportCsv() {
-    final buf = StringBuffer();
-    buf.writeln('ID,Действие,Тип,Администратор,Время');
+    final header = ['ID', 'Действие', 'Тип', 'Администратор', 'Время']
+        .join(_csvSeparator);
 
-    for (final log in _logs) {
-      // Экранируем каждое поле для защиты от CSV injection
-      buf.writeln([
+    final rows = _logs.map((log) {
+      return [
         log.id.toString(),
         _escapeCsv(log.action),
         _escapeCsv(log.entityType),
         _escapeCsv(log.adminName),
         log.timestamp.toIso8601String(),
-      ].join(','));
-    }
+      ].join(_csvSeparator);
+    });
 
-    return buf.toString();
+    return [header, ...rows].join('\n');
   }
 
-  /// Экранирование значений для CSV (защита от injection)
+  /// Экранирование для CSV (защита от injection)
   String _escapeCsv(String value) {
-    // Если содержит запятую, кавычки или перевод строки - оборачиваем в кавычки
-    if (value.contains(',') || value.contains('"') || value.contains('\n')) {
-      // Удваиваем кавычки внутри и оборачиваем в кавычки
-      return '"${value.replaceAll('"', '""')}"';
-    }
-    return value;
+    final needsQuotes = value.contains(_csvSeparator) ||
+        value.contains(_csvQuote) ||
+        value.contains('\n');
+
+    if (!needsQuotes) return value;
+
+    final escaped = value.replaceAll(_csvQuote, _csvQuote * 2);
+    return '$_csvQuote$escaped$_csvQuote';
   }
 
   Future<void> clearAll() async {
     _logs.clear();
     _nextId = 1;
-    await _prefs.remove(_key);
+    await _prefs.remove(_storageKey);
     notifyListeners();
   }
 

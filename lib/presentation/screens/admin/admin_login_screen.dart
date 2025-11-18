@@ -43,17 +43,22 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
       secondCode: _needsSecondFactor ? _pinController.text : null,
     );
 
-    if ((result == 'OK' || result == 'OK_BACKUP_USED') && mounted) {
+    final isSuccess = result == AdminAuthProvider.resultOk ||
+        result == AdminAuthProvider.resultBackupUsed;
+
+    if (isSuccess && mounted) {
+      final usedBackup = result == AdminAuthProvider.resultBackupUsed;
+
       // Логируем успешный вход
       await adminLogs.add(
-        action: result == 'OK_BACKUP_USED' ? 'backup_code_used' : 'login',
+        action: usedBackup ? 'backup_code_used' : 'login',
         entityType: 'security',
         adminName: adminAuth.name,
-        entityName: result == 'OK_BACKUP_USED' ? 'Использован резервный код' : null,
+        entityName: usedBackup ? 'Использован резервный код' : null,
       );
 
-      // Показываем предупреждение при использовании backup кода
-      if (result == 'OK_BACKUP_USED' && mounted) {
+      // Предупреждение при использовании backup кода
+      if (usedBackup && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('⚠️ Использован резервный код. Осталось кодов: см. настройки'),
@@ -63,9 +68,9 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
         );
       }
 
-      // Переходим на панель администратора
+      // Переход на панель администратора
       context.go('/admin');
-    } else if (result == 'NEED_SECOND' && mounted) {
+    } else if (result == AdminAuthProvider.resultNeedSecond && mounted) {
       // Нужен второй фактор
       setState(() {
         _isLoading = false;
