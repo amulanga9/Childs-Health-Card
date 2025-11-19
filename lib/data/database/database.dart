@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
+import 'package:flutter/foundation.dart'; // For kDebugMode
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 
@@ -44,13 +45,16 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
         onCreate: (Migrator m) async {
           // Создание всех таблиц
           await m.createAll();
+
+          // PERFORMANCE: Создание индексов для частых запросов
+          await _createIndexes();
         },
         onUpgrade: (Migrator m, int from, int to) async {
           // Миграция с версии 1 на 2
@@ -61,19 +65,36 @@ class AppDatabase extends _$AppDatabase {
             // Создаём таблицу QRTokens
             await m.createTable(qRTokens);
           }
+
+          // Миграция с версии 2 на 3
+          if (from == 2 && to == 3) {
+            // PERFORMANCE: Добавление индексов для оптимизации запросов
+            await _createIndexes();
+          }
+
+          // Прямая миграция с 1 на 3
+          if (from == 1 && to == 3) {
+            await m.addColumn(episodes, episodes.parentEpisodeId);
+            await m.createTable(qRTokens);
+            await _createIndexes();
+          }
         },
         beforeOpen: (details) async {
           // Включение внешних ключей в SQLite
           await customStatement('PRAGMA foreign_keys = ON');
 
-          // Вставка тестовых данных при первом запуске
-          if (details.wasCreated) {
+          // PRODUCTION SAFETY: Тестовые данные только в debug режиме
+          // В production build (release/profile) тестовые данные не вставляются
+          if (kDebugMode && details.wasCreated) {
             await _insertTestData();
           }
         },
       );
 
-  /// Вставка тестовых данных
+  /// Вставка тестовых данных (ТОЛЬКО ДЛЯ DEBUG РЕЖИМА)
+  ///
+  /// PRODUCTION SAFETY: Эта функция вызывается только когда kDebugMode == true
+  /// В release/profile builds тестовые данные не вставляются
   Future<void> _insertTestData() async {
     // Создаём тестового ребёнка
     final childId = await childDao.createChild(
@@ -285,6 +306,84 @@ class AppDatabase extends _$AppDatabase {
     );
 
     print('✅ Тестовые данные успешно добавлены в базу данных');
+  }
+
+  /// Создание индексов для оптимизации производительности
+  ///
+  /// PERFORMANCE: Индексы ускоряют часто используемые запросы:
+  /// - Фильтрация эпизодов по child_id
+  /// - Поиск активных/завершенных эпизодов по status
+  /// - Сортировка эпизодов по дате (start_date)
+  /// - Фильтрация связанных данных по episode_id
+  /// - Поиск по датам (at_datetime)
+  /// - Фильтрация процедур по статусу
+  /// - Поиск QR токенов по child_id, expires_at, isActive
+  Future<void> _createIndexes() async {
+    // Episodes: фильтрация по child_id и status, сортировка по start_date
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_episodes_child_id ON episodes(child_id)',
+    );
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_episodes_status ON episodes(status)',
+    );
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_episodes_start_date ON episodes(start_date DESC)',
+    );
+
+    // Prescriptions: фильтрация по episode_id
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_prescriptions_episode_id ON prescriptions(episode_id)',
+    );
+
+    // Intakes: фильтрация по prescription_id и at_datetime
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_intakes_prescription_id ON intakes(prescription_id)',
+    );
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_intakes_at_datetime ON intakes(at_datetime)',
+    );
+
+    // Tests: фильтрация по episode_id и at_datetime
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_tests_episode_id ON tests(episode_id)',
+    );
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_tests_at_datetime ON tests(at_datetime)',
+    );
+
+    // Procedures: фильтрация по episode_id, at_datetime, status
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_procedures_episode_id ON procedures(episode_id)',
+    );
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_procedures_at_datetime ON procedures(at_datetime)',
+    );
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_procedures_status ON procedures(status)',
+    );
+
+    // Attachments: фильтрация по episode_id
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_attachments_episode_id ON attachments(episode_id)',
+    );
+
+    // QRTokens: фильтрация по child_id, episode_id, expires_at, isActive
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_qr_tokens_child_id ON qr_tokens(child_id)',
+    );
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_qr_tokens_episode_id ON qr_tokens(episode_id)',
+    );
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_qr_tokens_expires_at ON qr_tokens(expires_at)',
+    );
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_qr_tokens_is_active ON qr_tokens(is_active)',
+    );
+
+    if (kDebugMode) {
+      print('✅ Database indexes created successfully');
+    }
   }
 }
 
