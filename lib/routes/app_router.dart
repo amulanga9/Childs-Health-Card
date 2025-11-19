@@ -1,8 +1,11 @@
+import 'package:flutter/widgets.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 import '../presentation/screens/home_screen.dart';
 import '../presentation/screens/episode_detail_screen_new.dart';
 import '../presentation/screens/qr_generator_screen.dart';
 import '../presentation/screens/settings_screen.dart';
+import '../presentation/providers/admin_auth_provider.dart';
 
 // Admin screens
 import '../presentation/screens/admin/admin_login_screen.dart';
@@ -14,8 +17,25 @@ import '../presentation/screens/admin/admin_settings_screen.dart';
 import '../presentation/screens/admin/admin_logs_screen.dart';
 
 /// Конфигурация маршрутов приложения
-/// Использует GoRouter для навигации
+/// Использует GoRouter для навигации с защитой admin роутов
 class AppRouter {
+  /// Проверка авторизации админа (Auth Guard)
+  ///
+  /// SECURITY: Защищает admin роуты от неавторизованного доступа
+  static String? _adminAuthGuard(BuildContext context, GoRouterState state) {
+    final adminAuth = context.read<AdminAuthProvider>();
+
+    // Если пользователь НЕ авторизован как админ
+    if (!adminAuth.isAuth) {
+      // Перенаправляем на экран входа
+      // Сохраняем originalLocation для возврата после логина
+      return '/admin/login?redirect=${Uri.encodeComponent(state.matchedLocation)}';
+    }
+
+    // Если авторизован - разрешаем доступ
+    return null;
+  }
+
   static final GoRouter router = GoRouter(
     initialLocation: '/',
     routes: [
@@ -39,8 +59,19 @@ class AppRouter {
         path: '/episode/:episodeId',
         name: 'episodeDetail',
         builder: (context, state) {
-          final episodeId = int.parse(state.pathParameters['episodeId']!);
-          return EpisodeDetailScreenNew(episodeId: episodeId);
+          final episodeIdStr = state.pathParameters['episodeId'];
+          if (episodeIdStr == null) {
+            // Если ID отсутствует, возвращаемся на главную
+            return const HomeScreen();
+          }
+
+          try {
+            final episodeId = int.parse(episodeIdStr);
+            return EpisodeDetailScreenNew(episodeId: episodeId);
+          } catch (e) {
+            // Если ID невалиден, возвращаемся на главную
+            return const HomeScreen();
+          }
         },
       ),
 
@@ -58,19 +89,22 @@ class AppRouter {
         builder: (context, state) => const SettingsScreen(),
       ),
 
-      // ============ АДМИНСКАЯ ПАНЕЛЬ ============
+      // ============ АДМИНСКАЯ ПАНЕЛЬ (ЗАЩИЩЕНО) ============
 
-      // Вход в админку
+      // Вход в админку (не требует авторизации)
       GoRoute(
         path: '/admin/login',
         name: 'adminLogin',
         builder: (context, state) => const AdminLoginScreen(),
       ),
 
+      // ===== ВСЕ ОСТАЛЬНЫЕ ADMIN РОУТЫ ЗАЩИЩЕНЫ AUTH GUARD =====
+
       // Панель администратора
       GoRoute(
         path: '/admin',
         name: 'adminDashboard',
+        redirect: _adminAuthGuard,
         builder: (context, state) => const AdminDashboardScreen(),
       ),
 
@@ -78,6 +112,7 @@ class AppRouter {
       GoRoute(
         path: '/admin/children',
         name: 'adminChildren',
+        redirect: _adminAuthGuard,
         builder: (context, state) => const AdminChildrenScreen(),
       ),
 
@@ -85,6 +120,7 @@ class AppRouter {
       GoRoute(
         path: '/admin/episodes',
         name: 'adminEpisodes',
+        redirect: _adminAuthGuard,
         builder: (context, state) => const AdminEpisodesScreen(),
       ),
 
@@ -92,6 +128,7 @@ class AppRouter {
       GoRoute(
         path: '/admin/users',
         name: 'adminUsers',
+        redirect: _adminAuthGuard,
         builder: (context, state) => const AdminUsersScreen(),
       ),
 
@@ -99,6 +136,7 @@ class AppRouter {
       GoRoute(
         path: '/admin/settings',
         name: 'adminSettings',
+        redirect: _adminAuthGuard,
         builder: (context, state) => const AdminSettingsScreen(),
       ),
 
@@ -106,12 +144,30 @@ class AppRouter {
       GoRoute(
         path: '/admin/logs',
         name: 'adminLogs',
+        redirect: _adminAuthGuard,
         builder: (context, state) => const AdminLogsScreen(),
       ),
-
-      // TODO: Добавить остальные экраны по мере реализации
-      // - /child-profile/:childId
-      // - /add-child
     ],
+
+    // Обработка ошибок навигации
+    errorBuilder: (context, state) {
+      return const Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.error_outline, size: 64, color: Colors.red),
+              SizedBox(height: 16),
+              Text(
+                'Страница не найдена',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              SizedBox(height: 8),
+              Text('404: Запрошенная страница не существует'),
+            ],
+          ),
+        ),
+      );
+    },
   );
 }
