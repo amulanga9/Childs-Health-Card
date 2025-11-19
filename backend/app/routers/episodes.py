@@ -1,6 +1,7 @@
 """
 Эндпоинты для работы с эпизодами
 """
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 from typing import List
@@ -8,6 +9,7 @@ from ..database import get_db
 from ..schemas import EpisodeResponse, AttachmentResponse, FileUploadResponse
 from ..models import Episode, Attachment
 from ..services.s3_service import s3_service
+from ..auth import verify_api_key_header
 
 
 router = APIRouter(prefix="/episodes", tags=["episodes"])
@@ -17,6 +19,7 @@ router = APIRouter(prefix="/episodes", tags=["episodes"])
 async def get_episode(
     episode_id: int,
     db: Session = Depends(get_db),
+    api_key: str = Depends(verify_api_key_header),
 ):
     """
     Получение эпизода по ID
@@ -39,6 +42,7 @@ async def get_episode(
 async def get_episode_attachments(
     episode_id: int,
     db: Session = Depends(get_db),
+    api_key: str = Depends(verify_api_key_header),
 ):
     """
     Получение вложений эпизода
@@ -70,6 +74,7 @@ async def upload_file_to_episode(
     episode_id: int,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
+    api_key: str = Depends(verify_api_key_header),
 ):
     """
     Загрузка файла для эпизода в Yandex Object Storage
@@ -151,6 +156,3 @@ async def upload_file_to_episode(
             status_code=500,
             detail=f"Ошибка обработки файла: {str(e)}",
         )
-
-
-from datetime import datetime

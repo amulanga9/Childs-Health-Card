@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     JWT_SECRET_KEY: str
     JWT_ALGORITHM: str = "HS256"
 
+    # API Authentication
+    API_KEY: str = ""  # Отдельный ключ для API (НЕ JWT_SECRET_KEY!)
+
     # QR Token
     QR_TOKEN_EXPIRE_HOURS: int = 48
 
@@ -70,6 +73,18 @@ class Settings(BaseSettings):
             errors.append(f"⚠️  JWT_SECRET_KEY содержит небезопасное значение: '{self.JWT_SECRET_KEY}'")
         elif len(self.JWT_SECRET_KEY) < 32:
             errors.append(f"⚠️  JWT_SECRET_KEY слишком короткий (минимум 32 символа)")
+
+        # Проверка API_KEY (должен быть отдельным от JWT_SECRET_KEY!)
+        if not self.DEBUG:
+            if not self.API_KEY:
+                errors.append("❌ API_KEY не указан (обязателен для production)")
+            elif self.API_KEY == self.JWT_SECRET_KEY:
+                errors.append("🔴 КРИТИЧНО: API_KEY не должен быть равен JWT_SECRET_KEY!")
+            elif len(self.API_KEY) < 32:
+                errors.append(f"⚠️  API_KEY слишком короткий (минимум 32 символа)")
+        else:
+            if self.API_KEY and self.API_KEY == self.JWT_SECRET_KEY:
+                errors.append("⚠️  API_KEY равен JWT_SECRET_KEY (допустимо только в DEBUG режиме)")
 
         # Проверка Yandex Object Storage
         placeholder_values = ["your_access_key_here", "your_secret_key_here"]

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:crypto/crypto.dart';
 import '../../data/models/admin_security.dart';
 
 /// Провайдер авторизации админ-панели
@@ -20,6 +21,7 @@ class AdminAuthProvider with ChangeNotifier {
 
   // Константы
   static const _defaultPass = '0000';
+  static const _migrationKey = 'admin_pass_hashed_v1';  // Ключ для отслеживания миграции
 
   // Публичные константы результатов login()
   static const resultOk = 'OK';
@@ -56,6 +58,9 @@ class AdminAuthProvider with ChangeNotifier {
   bool get hasSecondFactor => _secondFactor?.enabled ?? false;
 
   Future<void> _load() async {
+    // Миграция: хеширование существующих паролей в plaintext
+    await _migratePasswordToHash();
+
     _name = _prefs.getString(_nameKey) ?? 'Админ';
     _role = _prefs.getString(_roleKey) ?? AdminRole.admin;
 
@@ -87,6 +92,39 @@ class AdminAuthProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  /// Миграция: хеширование plaintext паролей (выполняется один раз)
+  Future<void> _migratePasswordToHash() async {
+    final isMigrated = _prefs.getBool(_migrationKey) ?? false;
+
+    if (!isMigrated) {
+      final existingPass = await _secure.read(key: _passKey);
+
+      if (existingPass != null) {
+        // Хешируем существующий пароль
+        final hashedPass = _hashPassword(existingPass);
+        await _secure.write(key: _passKey, value: hashedPass);
+        debugPrint('✅ Пароль админки мигрирован в хешированный формат');
+      } else {
+        // Если пароля нет, создаем хеш дефолтного пароля
+        final hashedDefaultPass = _hashPassword(_defaultPass);
+        await _secure.write(key: _passKey, value: hashedDefaultPass);
+        debugPrint('✅ Создан хеш дефолтного пароля');
+      }
+
+      await _prefs.setBool(_migrationKey, true);
+    }
+  }
+
+  /// Хеширование пароля с использованием SHA-256
+  String _hashPassword(String password) {
+    // SECURITY: Используем SHA-256 для хеширования
+    // В production рекомендуется использовать более стойкие алгоритмы (bcrypt, argon2)
+    // Но для Flutter sha256 из crypto package - приемлемый вариант
+    final bytes = utf8.encode(password);
+    final hash = sha256.convert(bytes);
+    return hash.toString();
+  }
+
   /// Вход в админ-панель
   Future<String> login(String pass, {String? secondCode}) async {
     // 1. Валидация
@@ -111,9 +149,19 @@ class AdminAuthProvider with ChangeNotifier {
     return await _handleSuccessfulLogin();
   }
 
+  /// Проверка пароля с хешированием (SECURE)
   Future<bool> _checkPassword(String pass) async {
-    final saved = await _secure.read(key: _passKey) ?? _defaultPass;
-    return pass == saved;
+    final savedHash = await _secure.read(key: _passKey);
+
+    if (savedHash == null) {
+      // Если нет сохраненного пароля, сравниваем с хешем дефолтного
+      final defaultHash = _hashPassword(_defaultPass);
+      return _hashPassword(pass) == defaultHash;
+    }
+
+    // Сравниваем хеш введенного пароля с сохраненным хешем
+    final inputHash = _hashPassword(pass);
+    return inputHash == savedHash;
   }
 
   Future<String> _checkSecondFactor(String? code) async {
@@ -186,21 +234,38 @@ class AdminAuthProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  /// Смена пароля с хешированием (SECURE)
   Future<bool> changePass(String oldPass, String newPass) async {
     // Валидация
     if (oldPass.isEmpty || newPass.isEmpty) {
       return false;
     }
 
-    final saved = await _secure.read(key: _passKey) ?? _defaultPass;
-    if (oldPass != saved) return false;
+    // Проверяем минимальную длину нового пароля
+    if (newPass.length < 4) {
+      debugPrint('Ошибка: новый пароль слишком короткий (минимум 4 символа)');
+      return false;
+    }
 
-    await _secure.write(key: _passKey, value: newPass);
+    // Проверяем старый пароль
+    final isOldPassCorrect = await _checkPassword(oldPass);
+    if (!isOldPassCorrect) {
+      debugPrint('Ошибка: неверный старый пароль');
+      return false;
+    }
+
+    // Сохраняем хеш нового пароля
+    final newPassHash = _hashPassword(newPass);
+    await _secure.write(key: _passKey, value: newPassHash);
+    debugPrint('✅ Пароль успешно изменен');
     return true;
   }
 
+  /// Сброс пароля на дефолтный (с хешированием)
   Future<void> resetPass() async {
-    await _secure.write(key: _passKey, value: _defaultPass);
+    final defaultHash = _hashPassword(_defaultPass);
+    await _secure.write(key: _passKey, value: defaultHash);
+    debugPrint('⚠️  Пароль сброшен на дефолтный');
   }
 
   // Управление вторым фактором

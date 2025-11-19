@@ -7,8 +7,11 @@ from typing import Optional, BinaryIO
 import hashlib
 from datetime import datetime
 import io
+import logging
 from PIL import Image
 from ..config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class S3Service:
@@ -46,12 +49,19 @@ class S3Service:
 
         Returns:
             Сжатые байты изображения
+
+        Raises:
+            ValueError: Если данные не являются валидным изображением
         """
         if len(image_data) <= max_size:
             return image_data
 
-        # Открываем изображение
-        image = Image.open(io.BytesIO(image_data))
+        try:
+            # Открываем изображение
+            image = Image.open(io.BytesIO(image_data))
+        except Exception as e:
+            logger.error(f"Ошибка открытия изображения: {e}")
+            raise ValueError(f"Невалидное изображение: {e}")
 
         # Конвертируем в RGB если необходимо
         if image.mode in ("RGBA", "P"):
@@ -97,17 +107,25 @@ class S3Service:
             if compress and content_type.startswith("image/"):
                 file_data = self.compress_image(file_data)
 
-            # Загрузка файла
+            # Загрузка файла с ПРИВАТНЫМ доступом (медицинские данные!)
             self.s3_client.put_object(
                 Bucket=self.bucket_name,
                 Key=key,
                 Body=file_data,
                 ContentType=content_type,
-                ACL="public-read",  # Публичный доступ для QR функциональности
+                ACL="private",  # ПРИВАТНЫЙ доступ - безопасность медицинских данных
+                ServerSideEncryption="AES256",  # Шифрование на стороне сервера
             )
 
-            # Генерация публичного URL
-            url = f"{settings.YC_STORAGE_ENDPOINT}/{self.bucket_name}/{key}"
+            # Генерация временной presigned URL (действует 24 часа)
+            url = self.get_file_url(key, expires_in=86400)
+
+            if not url:
+                logger.error(f"Не удалось сгенерировать presigned URL для {key}")
+                return {
+                    "success": False,
+                    "error": "Ошибка генерации временного URL",
+                }
 
             return {
                 "success": True,
@@ -117,6 +135,13 @@ class S3Service:
             }
 
         except ClientError as e:
+            logger.error(f"Ошибка загрузки файла в S3: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+            }
+        except Exception as e:
+            logger.error(f"Неожиданная ошибка при загрузке файла: {e}")
             return {
                 "success": False,
                 "error": str(e),
@@ -137,21 +162,24 @@ class S3Service:
                 Bucket=self.bucket_name,
                 Key=key,
             )
+            logger.info(f"Файл успешно удален: {key}")
             return True
         except ClientError as e:
-            print(f"Ошибка удаления файла: {e}")
+            logger.error(f"Ошибка удаления файла {key}: {e}")
             return False
 
     def get_file_url(self, key: str, expires_in: int = 3600) -> Optional[str]:
         """
-        Генерация временной ссылки на файл
+        Генерация временной presigned ссылки на файл
+
+        ВАЖНО: Используется для безопасного доступа к приватным медицинским файлам
 
         Args:
             key: Ключ файла
-            expires_in: Время жизни ссылки в секундах
+            expires_in: Время жизни ссылки в секундах (по умолчанию 1 час)
 
         Returns:
-            Временная ссылка или None при ошибке
+            Временная presigned ссылка или None при ошибке
         """
         try:
             url = self.s3_client.generate_presigned_url(
@@ -164,7 +192,10 @@ class S3Service:
             )
             return url
         except ClientError as e:
-            print(f"Ошибка генерации URL: {e}")
+            logger.error(f"Ошибка генерации presigned URL для {key}: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Неожиданная ошибка при генерации URL: {e}")
             return None
 
     def file_exists(self, key: str) -> bool:
