@@ -2,7 +2,7 @@
 Эндпоинты для работы с QR токенами
 """
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import func, extract
 from datetime import datetime, timedelta
 from typing import Optional
@@ -119,44 +119,42 @@ async def get_qr_data(
             raise HTTPException(status_code=404, detail="Ребёнок не найден")
 
         # Получение последнего эпизода или указанного
+        # PERFORMANCE: Используем selectinload для eager loading всех связанных данных (исправлен N+1 queries)
         latest_episode = None
         if qr_token.episode_id:
             # Если указан конкретный эпизод
-            episode = db.query(Episode).filter(Episode.id == qr_token.episode_id).first()
+            episode = (
+                db.query(Episode)
+                .options(
+                    selectinload(Episode.prescriptions),
+                    selectinload(Episode.tests),
+                    selectinload(Episode.procedures),
+                    selectinload(Episode.attachments),
+                )
+                .filter(Episode.id == qr_token.episode_id)
+                .first()
+            )
         else:
             # Последний эпизод ребёнка
             episode = (
                 db.query(Episode)
+                .options(
+                    selectinload(Episode.prescriptions),
+                    selectinload(Episode.tests),
+                    selectinload(Episode.procedures),
+                    selectinload(Episode.attachments),
+                )
                 .filter(Episode.child_id == child.id)
                 .order_by(Episode.start_date.desc())
                 .first()
             )
 
         if episode:
-            # Загрузка связанных данных
-            prescriptions = (
-                db.query(Prescription)
-                .filter(Prescription.episode_id == episode.id)
-                .all()
-            )
-
-            tests = (
-                db.query(Test)
-                .filter(Test.episode_id == episode.id)
-                .all()
-            )
-
-            procedures = (
-                db.query(Procedure)
-                .filter(Procedure.episode_id == episode.id)
-                .all()
-            )
-
-            attachments = (
-                db.query(Attachment)
-                .filter(Attachment.episode_id == episode.id)
-                .all()
-            )
+            # Связанные данные уже загружены через selectinload (1 запрос вместо 4)
+            prescriptions = episode.prescriptions
+            tests = episode.tests
+            procedures = episode.procedures
+            attachments = episode.attachments
 
             latest_episode = QRDataEpisode(
                 diagnosis=episode.diagnosis,

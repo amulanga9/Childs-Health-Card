@@ -56,7 +56,7 @@ ALLOWED_FIELDS: Dict[Type, Set[str]] = {
 }
 
 
-def upsert_model(db: Session, model_class: Type, data: dict) -> int:
+def upsert_model(db: Session, model_class: Type, data: dict, auto_commit: bool = True) -> int:
     """
     Безопасная вставка или обновление записи по mobile_id
 
@@ -65,10 +65,15 @@ def upsert_model(db: Session, model_class: Type, data: dict) -> int:
     - Защищает системные поля (id, created_at, updated_at)
     - Предотвращает SQL injection через ORM
 
+    PERFORMANCE:
+    - Поддержка batch режима (auto_commit=False)
+    - Позволяет обработать множество записей в одной транзакции
+
     Args:
         db: Database session
         model_class: SQLAlchemy model class
         data: Данные для upsert
+        auto_commit: Автоматически коммитить изменения (по умолчанию True)
 
     Returns:
         ID созданной/обновлённой записи
@@ -110,8 +115,11 @@ def upsert_model(db: Session, model_class: Type, data: dict) -> int:
             if updated_fields:
                 logger.debug(f"✅ Обновлены поля {updated_fields} для {model_class.__name__}[{mobile_id}]")
 
-            db.commit()
-            db.refresh(existing)
+            if auto_commit:
+                db.commit()
+                db.refresh(existing)
+            else:
+                db.flush()  # Получаем ID без commit
             return existing.id
 
         else:
@@ -124,8 +132,12 @@ def upsert_model(db: Session, model_class: Type, data: dict) -> int:
 
             new_obj = model_class(**safe_data)
             db.add(new_obj)
-            db.commit()
-            db.refresh(new_obj)
+
+            if auto_commit:
+                db.commit()
+                db.refresh(new_obj)
+            else:
+                db.flush()  # Получаем ID без commit
 
             logger.debug(f"✅ Создана новая запись {model_class.__name__}[{mobile_id}] -> DB ID {new_obj.id}")
             return new_obj.id
@@ -157,6 +169,10 @@ async def sync_data(
     - Использует whitelist полей при обновлении
     - Защита от SQL injection через Pydantic validation + ORM
 
+    PERFORMANCE:
+    - Batch операции: все записи обрабатываются в одной транзакции
+    - Вместо N commits теперь 1 commit для всех данных
+
     Принимает все данные из мобильного приложения и сохраняет в PostgreSQL.
     Использует безопасную upsert логику (создание или обновление по mobile_id).
 
@@ -166,40 +182,46 @@ async def sync_data(
     try:
         synced_counts: Dict[str, int] = {}
 
+        # PERFORMANCE: Используем одну транзакцию для всех операций
+        # Отключаем autocommit в функции upsert_model
+
         # Синхронизация детей
         for child_data in request.children:
-            upsert_model(db, Child, child_data.model_dump())
+            upsert_model(db, Child, child_data.model_dump(), auto_commit=False)
         synced_counts["children"] = len(request.children)
 
         # Синхронизация эпизодов
         for episode_data in request.episodes:
-            upsert_model(db, Episode, episode_data.model_dump())
+            upsert_model(db, Episode, episode_data.model_dump(), auto_commit=False)
         synced_counts["episodes"] = len(request.episodes)
 
         # Синхронизация назначений
         for prescription_data in request.prescriptions:
-            upsert_model(db, Prescription, prescription_data.model_dump())
+            upsert_model(db, Prescription, prescription_data.model_dump(), auto_commit=False)
         synced_counts["prescriptions"] = len(request.prescriptions)
 
         # Синхронизация приёмов
         for intake_data in request.intakes:
-            upsert_model(db, Intake, intake_data.model_dump())
+            upsert_model(db, Intake, intake_data.model_dump(), auto_commit=False)
         synced_counts["intakes"] = len(request.intakes)
 
         # Синхронизация анализов
         for test_data in request.tests:
-            upsert_model(db, Test, test_data.model_dump())
+            upsert_model(db, Test, test_data.model_dump(), auto_commit=False)
         synced_counts["tests"] = len(request.tests)
 
         # Синхронизация процедур
         for procedure_data in request.procedures:
-            upsert_model(db, Procedure, procedure_data.model_dump())
+            upsert_model(db, Procedure, procedure_data.model_dump(), auto_commit=False)
         synced_counts["procedures"] = len(request.procedures)
 
         # Синхронизация вложений
         for attachment_data in request.attachments:
-            upsert_model(db, Attachment, attachment_data.model_dump())
+            upsert_model(db, Attachment, attachment_data.model_dump(), auto_commit=False)
         synced_counts["attachments"] = len(request.attachments)
+
+        # PERFORMANCE: Единственный commit для всех данных (вместо N commits)
+        db.commit()
 
         logger.info(f"✅ Синхронизация завершена: {synced_counts}")
 
